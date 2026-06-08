@@ -13,6 +13,7 @@ class Baseliner():
         self.mq_monitor_dir=f'{data_dir_uri}/monitors/model-quality'
         self.mb_monitor_dir=f'{data_dir_uri}/monitors/model-bias'
         self.me_monitor_dir=f'{data_dir_uri}/monitors/model-explainability'
+        self.bt_monitor_dir=f'{data_dir_uri}/monitors/batch'
         
         self.monitor_instance_type=monitor_instance_type
 
@@ -171,3 +172,50 @@ class Baseliner():
         )
 
         return me_baseline_step
+    
+    def get_monitor_batch_transform_step(self, sagemaker_session, create_model_step, scope, writes={}, depends_on=[]):
+            
+        transformer = sagemaker.transformer.Transformer(
+            model_name=create_model_step.properties.Outputs['model_name'],
+            instance_count=1,
+            instance_type=self.monitor_instance_type,
+            output_path=f'{self.bt_monitor_dir}/info',
+            accept='text/csv',
+            assemble_with='Line',
+            sagemaker_session=sagemaker_session
+        )
+        mq_monitor_step = sagemaker.workflow.monitor_batch_transform_step.MonitorBatchTransformStep(
+            name='ModelQualityMonitorStep',
+            transform_step_args=transformer.transform(
+                data=input_data.default_value,
+                content_type='text/csv',
+                split_type='Line'
+            ),
+            monitor_configuration=model_quality_monitor,
+            baseline_statistics=read_ssm_step.properties.Outputs['mq_statistics_path'],
+            baseline_constraints=read_ssm_step.properties.Outputs['mq_constraints_path'],
+            output_s3_uri=f'{output_path.default_value}/mq-reports/',
+            ground_truth_input=ground_truth_s3_path,  # ground truth labels
+            fail_on_violation=False
+        )
+
+sagemaker.workflow.steps.
+TrainingStep
+TuningStep
+TuningStep.get_top_model_s3_uri(self, top_k, s3_bucket, prefix='')
+TransformStep
+ProcessingStep
+CreateModelStep
+
+sagemaker.workflow.lambda_step.
+LambdaStep
+
+sagemaker.workflow.quality_check_step.
+QualityCheckConfig # use for below
+
+sagemaker.workflow.quality_check_step.
+QualityCheckStep # for data quality and model quality
+
+sagemaker.workflow.clarify_check_step.
+ClarifyCheckConfig
+ClarifyCheckStep # for bias and explainability
