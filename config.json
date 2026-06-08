@@ -1,0 +1,10 @@
+{
+    "ENDPOINT_NAME":"abalone-endpoint",
+    "NETWORK":{
+        "VPC":{
+            "ID":"vpc-2000c45d",
+            "SUBNETS":[{"ID":"subnet-001be661bcef4b615"}, {"ID":"subnet-003ad32933ca43e74"}],
+            "SECURITY_GROUPS":["sg-63ef435d"]
+        }
+    }
+}
