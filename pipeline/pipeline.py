@@ -35,6 +35,7 @@ class CPipeline(Pipeline):
         self.train_file=        f'{data_dir}/input/train/train.csv'
         self.baseline_file=     f'{data_dir}/baseline/baseline.csv'
         self.baseline_pred_file=f'{data_dir}/baseline/baseline_pred.csv'
+        self.train_X_file=      f'{data_dir}/monitors/model-explainability/train_X.csv'
 
         self.baseliner = baseline.Baseliner(self.model_name, data_dir, self.baseline_file, self.train_file, monitor_instance_type)
 
@@ -114,6 +115,20 @@ class CPipeline(Pipeline):
         
         elif deployment_type == 'batch':
             create_model_step = self.get_batch_create_step(sagemaker_session)
+
+            batch_transform_step=self.get_batch_transform_step(self.train_X_file, depends_on=[create_model_step])
+
+            job_definition=self.baseline.get_job_definition(self.sagemaker_session, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
+
+            schedule_config = sagemaker.core.shapes.shapes.ScheduleConfig(
+                schedule_expression='cron(0 * ? * * *)', 
+                data_analysis_start_time="-PT1H", 
+                data_analysis_end_time="-PT2H"
+            )
+
+            model_quality_step=self.baseline.get_batch_model_quality_step(self.sagemaker_session, batch_transform_step, schedule_config, job_definition, depends_on=[batch_transform_step])
+
+
             return [create_model_step]
         else:
             return []
@@ -164,8 +179,9 @@ class CPipeline(Pipeline):
         create_model_step = sagemaker.workflow.model_stepModelStep(
             name='CreateModelStep',
             step_args=model.create(
-                instance_type=instance_type.default_value
-            )
+                instance_type=self.endpoint_instance_type
+            ),
+            sagemaker_session=self.sagemaker_session
         )
         
         # make create model step
@@ -194,7 +210,8 @@ class CPipeline(Pipeline):
                     output_name='model_package_arn',
                     output_type=sagemaker.workflow.lambda_step.LambdaOutputTypeEnum.String
                 )
-            ]
+            ],
+            sagemaker_session=self.sagemaker_session
         )
         create_model_step=None
         return create_model_step 
@@ -208,7 +225,6 @@ class CPipeline(Pipeline):
             script='scripts/deploy_endpoint.py',
             handler='deploy_endpoint.handler',
             timeout=600,  # endpoints take time to deploy
-            depends_on=depends_on
         )
 
         deploy_endpoint_step = sagemaker.workflow.LambdaStep(
@@ -226,16 +242,12 @@ class CPipeline(Pipeline):
                     output_type=sagemaker.workflow.lambda_step.LambdaOutputTypeEnum.String
                 )
             ],
-            depends_on=[depends_on]
+            depends_on=depends_on,
+            sagemaker_session=self.sagemaker_session
         )
         return deploy_endpoint_step  
 
-    def get_batch_transform_step(self, features, target, input_data, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None, depends_on=[]):
-        # features=["length", "diameter", "height", "whole_weight", "shucked_weight", "viscera_weight", "shell_weight", "sex_I", "sex_M", "sex_F"]
-        # target='rings'
-        # probability_attribute=None
-        # probability_threshold_attribute=None
-        # exclude_features_attribute=None
+    def get_batch_transform_step(self, input_data, depends_on=[]):
 
         transformer = sagemaker.transformer.Transformer(
             model_name=self.model_name,
@@ -243,10 +255,17 @@ class CPipeline(Pipeline):
             instance_type=self.monitor_instance_type,
             output_path=f'{self.data_capture_dir}/transformations',
             accept='text/csv',
-            assemble_with='Line',
-            sagemaker_session=sagemaker_session
+            assemble_with='Line'
         )
 
+        # transform_step = steps.TransformStep(
+        #     name="TransformStep",
+        #     step_args=transformer.transform(
+        #         data='s3://omm-test-bucket/models/abalone/data/input/test/test_X.csv',
+        #         content_type='text/csv',
+        #         split_type='Line'
+        #     )
+        # )
         transform_step = sagemaker.mlops.workflow.steps.TransformStep(
             name="TransformStep",
             transformer=transformer,
@@ -254,7 +273,9 @@ class CPipeline(Pipeline):
                 data=input_data,
                 content_type='text/csv',
                 split_type='Line'
-            )
+            ),
+            depends_on=depends_on,
+            sagemaker_session=self.sagemaker_session
         )
 
         return transform_step
@@ -267,7 +288,6 @@ class CPipeline(Pipeline):
             script='scripts/ssm_read_write.py',
             handler='ssm_read_write.handler',
             timeout=30,  # endpoints take time to deploy
-            depends_on=depends_on
         )
 
         ssm_step = sagemaker.workflow.LambdaStep(
@@ -283,7 +303,8 @@ class CPipeline(Pipeline):
                     output_type=sagemaker.workflow.lambda_step.LambdaOutputTypeEnum.String
                 )
             ],
-            depends_on=[depends_on]
+            depends_on=depends_on,
+            sagemaker_session=self.sagemaker_session
         )
         return ssm_step    
     
@@ -329,8 +350,8 @@ if __name__ == '__main__':
     parser.add_argument('--wait',                     action='store_true', default=False) # False
     args = parser.parse_args()
 
-    boto_session = boto3.Session()
-    sagemaker_session = sagemaker.Session(boto_session=boto_session)
+    # sagemaker_session = sagemaker.Session(boto_session=boto3.Session())
+    sagemaker_session = sagemaker.PipelineSession(boto_session=boto3.Session())
     role = sagemaker.get_execution_role(sagemaker_session)
 
     model_package_group_name = ParameterString(name='ModelPackageGroupName')
