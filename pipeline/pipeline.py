@@ -114,10 +114,6 @@ class CPipeline(Pipeline):
         
         elif deployment_type == 'batch':
             create_model_step = self.get_batch_create_step(sagemaker_session)
-
-
-            
-
             return [create_model_step]
         else:
             return []
@@ -234,6 +230,34 @@ class CPipeline(Pipeline):
         )
         return deploy_endpoint_step  
 
+    def get_batch_transform_step(self, features, target, input_data, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None, depends_on=[]):
+        # features=["length", "diameter", "height", "whole_weight", "shucked_weight", "viscera_weight", "shell_weight", "sex_I", "sex_M", "sex_F"]
+        # target='rings'
+        # probability_attribute=None
+        # probability_threshold_attribute=None
+        # exclude_features_attribute=None
+
+        transformer = sagemaker.transformer.Transformer(
+            model_name=self.model_name,
+            instance_count=1,
+            instance_type=self.monitor_instance_type,
+            output_path=f'{self.data_capture_dir}/transformations',
+            accept='text/csv',
+            assemble_with='Line',
+            sagemaker_session=sagemaker_session
+        )
+
+        transform_step = sagemaker.mlops.workflow.steps.TransformStep(
+            name="TransformStep",
+            transformer=transformer,
+            inputs=sagemaker.inputs.TransformInput(
+                data=input_data,
+                content_type='text/csv',
+                split_type='Line'
+            )
+        )
+
+        return transform_step
 
     def get_ssm_step(self, scope, writes={}, depends_on=[]):
             

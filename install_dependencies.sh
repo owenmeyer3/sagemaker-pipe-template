@@ -6,6 +6,3 @@ sudo ./aws/install
 pip3 install --upgrade pip
 pip3 install sagemaker==3.13.1 --no-deps sagemaker-core sagemaker-train sagemaker-serve sagemaker-mlops
 pip3 install -r requirements.txt  -v
-
-
-

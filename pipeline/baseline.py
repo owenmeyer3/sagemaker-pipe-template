@@ -13,7 +13,7 @@ class Baseliner():
         self.mq_monitor_dir=f'{data_dir_uri}/monitors/model-quality'
         self.mb_monitor_dir=f'{data_dir_uri}/monitors/model-bias'
         self.me_monitor_dir=f'{data_dir_uri}/monitors/model-explainability'
-        self.bt_monitor_dir=f'{data_dir_uri}/monitors/batch'
+        self.mbt_monitor_dir=f'{data_dir_uri}/monitors/batch'
         
         self.monitor_instance_type=monitor_instance_type
 
@@ -173,25 +173,342 @@ class Baseliner():
 
         return me_baseline_step
     
-    def get_monitor_batch_transform_step(self, sagemaker_session, create_model_step, scope, writes={}, depends_on=[]):
+    def get_monitor_batch_transform_step(self, sagemaker_session, role, transform_step, scope, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None, writes={}, depends_on=[]):
+        # def get_monitor_batch_transform_step(self, sagemaker_session, role, create_model_step, scope, writes={}, depends_on=[]):
+
+        transform_step_args=transform_step.arguments
+        # {
+        #     'ModelName': 'sagemaker-xgboost-2026-05-21-17-13-20-923',
+        #     'TransformInput': {'DataSource': {'S3DataSource': {'S3DataType': 'S3Prefix',
+        #         'S3Uri': 's3://omm-test-bucket/models/abalone/data/input/test/test_X.csv'}},
+        #     'ContentType': 'text/csv',
+        #     'SplitType': 'Line'},
+        #     'TransformOutput': {'S3OutputPath': 's3://omm-test-bucket/models/test/data/transformations/out',
+        #     'Accept': 'text/csv',
+        #     'AssembleWith': 'Line'},
+        #     'TransformResources': {'InstanceType': 'ml.m5.large', 'InstanceCount': 1}
+        # }
+        batch_transform_input=transform_step_args['TransformInput']
+        batch_transform_output=transform_step_args['TransformOutput']
+
+        batch_transform_input = sagemaker.core.shapes.shapes.BatchTransformInput(
+            data_captured_destination_s3_uri=f'{self.data_capture_dir}/transformations',
+            dataset_format=sagemaker.core.shapes.shapes.MonitoringDatasetFormat(csv=sagemaker.core.shapes.shapes.MonitoringCsvDatasetFormat(header=True)),
+            local_path='/opt/ml/processing/input',
+            s3_input_mode='File',
+            s3_data_distribution_type='FullyReplicated', 
+            features_attribute=','.join(self.features),
+            inference_attribute=self.target,
+            probability_attribute=probability_attribute,
+            probability_threshold_attribute=probability_threshold_attribute,
+            start_time_offset="-PT2H",
+            end_time_offset="-PT1H",
+            exclude_features_attribute=exclude_features_attribute
+        )
+
+        monitoring_resources = sagemaker.core.shapes.shapes.MonitoringResources(
+            cluster_config=sagemaker.core.shapes.shapes.MonitoringClusterConfig(
+                instance_count=1,
+                instance_type=self.monitor_instance_type,
+                volume_size_in_gb=5,
+                volume_kms_key_id=None
+            )
+        )
+        monitoring_app_specification=sagemaker.core.shapes.shapes.MonitoringAppSpecification(
+            image_uri=sagemaker.core.image_uris.retrieve(framework='model-monitor', region='us-east-1'), # required - the container to run
+            # container_entrypoint=['...'],       # optional - override entrypoint
+            # container_arguments=['...'],        # optional - override arguments
+            # record_preprocessor_source_uri='s3://...', # optional - preprocessing script
+            # post_analytics_processor_source_uri='s3://...' # optional - postprocessing script
+        )
+
+        monitoring_job_definition = sagemaker.core.shapes.shapes.MonitoringJobDefinition(
+            monitoring_inputs= [sagemaker.core.shapes.shapes.MonitoringInput(batch_transform_input=batch_transform_input)], 
+            monitoring_output_config=sagemaker.core.shapes.shapes.MonitoringOutputConfig(
+                monitoring_outputs=[
+                    sagemaker.core.shapes.shapes.MonitoringOutput(
+                        s3_output=sagemaker.core.shapes.shapes.MonitoringS3Output(
+                            local_path='/opt/ml/processing/input', 
+                            s3_uri='s3://omm-test-bucket/models/test/batch-output/'
+                        )
+                    )]
+            ),
+            monitoring_resources=monitoring_resources, 
+            monitoring_app_specification=monitoring_app_specification, 
+            role_arn=sagemaker.core.helper.session_helper.get_execution_role(), 
+            stopping_condition=sagemaker.core.shapes.shapes.MonitoringStoppingCondition(
+                max_runtime_in_seconds=400
+            ), 
+            environment={}, 
+            # network_config: NetworkConfig | None = Unassigned()
+        )
+
+        schedule_config = sagemaker.core.shapes.shapes.ScheduleConfig(
+            schedule_expression='cron(0 * ? * * *)', 
+            data_analysis_start_time="-PT1H", 
+            data_analysis_end_time="-PT2H"
+            )
+
+#################### MODEL QUALITY
+
+    def get_batch_model_quality_step(self, sagemaker_session, role, schedule_config, monitoring_job_definition, depends_on=[]):
+
+        model_dashboard_monitoring_schedule=sagemaker.core.shapes.shapes.ModelDashboardMonitoringSchedule(
+            batch_transform_input=batch_transform_input,
+            monitoring_schedule_config=sagemaker.core.shapes.shapes.MonitoringScheduleConfig(
+                schedule_config=schedule_config,
+                monitoring_job_definition_name="'ModelQualityJobDefinition",
+                monitoring_job_definition=monitoring_job_definition,
+                monitoring_type="'ModelQuality" #DataQuality | ModelQuality | ModelBias | ModelExplainability
+            ),
+            monitoring_type="ModelQuality"
+        )
+
+        model_quality_check_config=sagemaker.mlops.workflow.quality_check_step.ModelQualityCheckConfig(
+            baseline_dataset=f'{self.mq_monitor_dir}/baseline.csv', 
+            dataset_format={}, 
+            problem_type='Regression',
+            output_s3_uri=f'{self.mq_monitor_dir}/info'
+        )
+        
+        mq_monitor_step = sagemaker.workflow.monitor_batch_transform_step.MonitorBatchTransformStep(
+            name='ModelQualityMonitorStep',
+            monitor_configuration=model_quality_check_config,
+            transform_step_args=transform_step_args,
+            baseline_statistics=f'{self.mq_monitor_dir}/info/statistics.json',
+            baseline_constraints=f'{self.mq_monitor_dir}/info/constraints.json',
+            output_s3_uri=f'{self.mq_monitor_dir}/transforms',
+            ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
+            fail_on_violation=False
+        )
+
+        return mq_monitor_step
+
+#################### MODEL BIAS
+
+        model_quality_check_config=sagemaker.mlops.workflow.quality_check_step.ModelQualityCheckConfig(
+            baseline_dataset=f'{self.mb_monitor_dir}/baseline.csv', 
+            dataset_format={}, 
+            problem_type='Regression',
+            output_s3_uri=f'{self.mb_monitor_dir}/predictions'
+        )
+        
+        mq_monitor_step = sagemaker.workflow.monitor_batch_transform_step.MonitorBatchTransformStep(
+            name='ModelQualityMonitorStep',
+            monitor_configuration=model_quality_check_config,
+            transform_step_args=transform_step_args,
+            baseline_statistics=f'{self.mb_monitor_dir}/info/statistics.json',
+            baseline_constraints=f'{self.mb_monitor_dir}/info/constraints.json',
+            output_s3_uri=f'{self.mb_monitor_dir}/transforms',
+            ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
+            fail_on_violation=False
+        )
+
+#################### DATA QUALITY
+
+        data_quality_config=sagemaker.mlops.workflow.quality_check_step.DataQualityCheckConfig(
+                baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv', 
+                dataset_format={}, 
+                output_s3_uri=f'{self.dq_monitor_dir}/predictions'
+        )
+        
+        mq_monitor_step = sagemaker.workflow.monitor_batch_transform_step.MonitorBatchTransformStep(
+            name='DataQualityMonitorStep',
+            monitor_configuration=model_quality_check_config,
+            transform_step_args=transform_step_args,
+            baseline_statistics=f'{self.dq_monitor_dir}/info/statistics.json',
+            baseline_constraints=f'{self.dq_monitor_dir}/info/constraints.json',
+            output_s3_uri=f'{self.dq_monitor_dir}/transforms',
+            ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
+            fail_on_violation=False
+        )
+
+#################### DATA BIAS
+
+        model_quality_check_config=sagemaker.mlops.workflow.quality_check_step.ModelQualityCheckConfig(
+            baseline_dataset=f'{self.db_monitor_dir}/baseline.csv', 
+            dataset_format={}, 
+            problem_type='Regression',
+            output_s3_uri=f'{self.db_monitor_dir}/predictions'
+        )
+        
+        mq_monitor_step = sagemaker.workflow.monitor_batch_transform_step.MonitorBatchTransformStep(
+            name='ModelQualityMonitorStep',
+            monitor_configuration=model_quality_check_config,
+            transform_step_args=transform_step_args,
+            baseline_statistics=f'{self.db_monitor_dir}/info/statistics.json',
+            baseline_constraints=f'{self.db_monitor_dir}/info/constraints.json',
+            output_s3_uri=f'{self.db_monitor_dir}/transforms',
+            ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
+            fail_on_violation=False
+        )
+
+#################### EXPLAINABILITY
+
+        model_quality_check_config=sagemaker.mlops.workflow.quality_check_step.ModelQualityCheckConfig(
+            baseline_dataset=f'{self.me_monitor_dir}/baseline.csv', 
+            dataset_format={}, 
+            problem_type='Regression',
+            output_s3_uri=f'{self.me_monitor_dir}/predictions'
+        )
+        
+        mq_monitor_step = sagemaker.workflow.monitor_batch_transform_step.MonitorBatchTransformStep(
+            name='ModelQualityMonitorStep',
+            monitor_configuration=model_quality_check_config,
+            transform_step_args=transform_step_args,
+            baseline_statistics=f'{self.me_monitor_dir}/info/statistics.json',
+            baseline_constraints=f'{self.me_monitor_dir}/info/constraints.json',
+            output_s3_uri=f'{self.me_monitor_dir}/transforms',
+            ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
+            fail_on_violation=False
+        )
+
+#################### 
+
+        # model_quality_monitor = sagemaker.model_monitor.ModelQualityMonitor(
+        #     role=role,
+        #     instance_count=1,
+        #     instance_type=self.monitor_instance_type,
+        #     volume_size_in_gb=20,
+        #     max_runtime_in_seconds=1800,
+        #     sagemaker_session=sagemaker_session
+        # )
+
+        data_quality_config=sagemaker.mlops.workflow.quality_check_step.DataQualityCheckConfig(
+                baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv', 
+                dataset_format={}, 
+                output_s3_uri=f'{self.dq_monitor_dir}/predictions'
+        )
+
+        model_quality_check_config=sagemaker.mlops.workflow.quality_check_step.ModelQualityCheckConfig(
+                baseline_dataset=f'{self.mq_monitor_dir}/baseline.csv', 
+                dataset_format={}, 
+                problem_type='Regression'
+                output_s3_uri=f'{self.mq_monitor_dir}/predictions'
+            )
+        
+        data_bias_check_config=sagemaker.mlops.workflow.clarify_check_step.DataBiasCheckConfig(
+            baseline_dataset=f'{self.mq_monitor_dir}/baseline.csv', 
+            dataset_format={}, 
+            output_s3_uri=f'{self.mq_monitor_dir}/predictions'
+        )
+    
+        model_bias_check_config=sagemaker.mlops.workflow.clarify_check_step.ModelBiasCheckConfig(
+            baseline_dataset=f'{self.mb_monitor_dir}/baseline.csv', 
+            dataset_format={}, 
+            output_s3_uri=f'{self.mb_monitor_dir}/predictions'
+        )
+    
+        model_explainability_check_config=sagemaker.mlops.workflow.clarify_check_step.ModelExplainabilityCheckConfig(
+            baseline_dataset=f'{self.me_monitor_dir}/baseline.csv', 
+            dataset_format={}, 
+            output_s3_uri=f'{self.me_monitor_dir}/predictions'
+        )
+    
+
+        clarify_check_config=sagemaker.mlops.workflow.clarify_check_step.ClarifyCheckConfig(
+            data_config=sagemaker.clarify.DataConfig(
+                s3_data_input_path=f'{self.mq_monitor_dir}/baseline.csv',
+                s3_output_path=f'{self.mq_monitor_dir}/info',
+                dataset_type='text/csv'
+                ), 
+                monitoring_analysis_config_uri=None
+            )
+        
+        check_job_config=sagemaker.mlops.workflow.check_job_config.CheckJobConfig(
+            role, 
+            instance_count=1, 
+            instance_type=self.monitor_instance_type, 
+            volume_size_in_gb=30, 
+            volume_kms_key=None, 
+            output_kms_key=None, 
+            max_runtime_in_seconds=None, 
+            base_job_name=None, 
+            sagemaker_session=sagemaker_session, 
+            env=None, 
+            tags=None, 
+            network_config=None
+        )
+
+        transformer = sagemaker.transformer.Transformer(
+            model_name=create_model_step.properties.Outputs['model_name'],
+            instance_count=1,
+            instance_type=self.monitor_instance_type,
+            output_path=f'{self.mbt_monitor_dir}/transformations',
+            accept='text/csv',
+            assemble_with='Line',
+            sagemaker_session=sagemaker_session
+        )
+
+        transform_step = sagemaker.mlops.workflow.steps.TransformStep(
+            name="TransformStep",
+            display_name="TransformStep",
+            description="",
+            step_args=transformer.transform(
+                data=input_data.default_value,
+                content_type='text/csv',
+                split_type='Line'
+            ),
+        )
+
+        quality_check_step = sagemaker.mlops.workflow.quality_check_step.QualityCheckStep(
+            name="QualityCheckStep",
+            description="",
+            quality_check_config=quality_check_config,
+            check_job_config=check_job_config,
+            skip_check=False,
+            supplied_baseline_statistics=f'{self.mq_monitor_dir}/info/supplied_baseline_statistics.json', 
+            supplied_baseline_constraints=f'{self.mq_monitor_dir}/info/constraints.json', 
+            fail_on_violation=True
+        )
+
+        clarify_check_step = sagemaker.mlops.workflow.clarify_check_step.ClarifyCheckStep(
+            name="ClarifyCheckStep",
+            description="",
+            quality_check_config=clarify_check_config,
+            check_job_config=check_job_config,
+            skip_check=False,
+            supplied_baseline_statistics=f'{self.mq_monitor_dir}/info/supplied_baseline_statistics.json', 
+            supplied_baseline_constraints=f'{self.mq_monitor_dir}/info/constraints.json', 
+            fail_on_violation=True
+        )
+        
+        # Quality Check
+        #   monitor_before_transform (bool): If to run data quality or model explainability
+        #    monitoring type, a true value of this flag indicates
+        #    running the check step before the transform job.
+        sagemaker.mlops.workflow.monitor_batch_transform_step.MonitorBatchTransformStep(
+            'MonitorBatchTransformStep', 
+            transform_step_args=transform_step_args,
+            monitor_configuration=quality_check_config, 
+            check_job_configuration=check_job_config, 
+            monitor_before_transform=False, 
+            fail_on_violation=True, 
+            supplied_baseline_statistics=f'{self.mq_monitor_dir}/info/supplied_baseline_statistics.json', 
+            supplied_baseline_constraints=f'{self.mq_monitor_dir}/info/constraints.json', 
+
+            )
+        
+        # Clarify Check
+        
+
+
+
             
         transformer = sagemaker.transformer.Transformer(
             model_name=create_model_step.properties.Outputs['model_name'],
             instance_count=1,
             instance_type=self.monitor_instance_type,
-            output_path=f'{self.bt_monitor_dir}/info',
+            output_path=f'{self.mbt_monitor_dir}/info',
             accept='text/csv',
             assemble_with='Line',
             sagemaker_session=sagemaker_session
         )
         mq_monitor_step = sagemaker.workflow.monitor_batch_transform_step.MonitorBatchTransformStep(
             name='ModelQualityMonitorStep',
-            transform_step_args=transformer.transform(
-                data=input_data.default_value,
-                content_type='text/csv',
-                split_type='Line'
-            ),
             monitor_configuration=model_quality_monitor,
+            transform_step_args=transform_step_args,
+            
             baseline_statistics=read_ssm_step.properties.Outputs['mq_statistics_path'],
             baseline_constraints=read_ssm_step.properties.Outputs['mq_constraints_path'],
             output_s3_uri=f'{output_path.default_value}/mq-reports/',
@@ -199,23 +516,28 @@ class Baseliner():
             fail_on_violation=False
         )
 
-sagemaker.workflow.steps.
-TrainingStep
-TuningStep
-TuningStep.get_top_model_s3_uri(self, top_k, s3_bucket, prefix='')
-TransformStep
-ProcessingStep
-CreateModelStep
-
-sagemaker.workflow.lambda_step.
-LambdaStep
-
-sagemaker.workflow.quality_check_step.
-QualityCheckConfig # use for below
-
-sagemaker.workflow.quality_check_step.
-QualityCheckStep # for data quality and model quality
-
-sagemaker.workflow.clarify_check_step.
-ClarifyCheckConfig
-ClarifyCheckStep # for bias and explainability
+        mbt_baseline_step = sagemaker.workflow.steps.ProcessingStep(
+            name='ExplainabilityBaselineStep',
+            step_args=model_explainability_monitor.suggest_baseline(
+                data_config=sagemaker.clarify.DataConfig(
+                    s3_data_input_path=f'{self.mbt_monitor_dir}/baseline.csv',
+                    s3_output_path=f'{self.mbt_monitor_dir}/info',
+                    dataset_type='text/csv'
+                ),
+                model_config=sagemaker.clarify.ModelConfig(
+                    model_name=self.model_name,
+                    instance_type=self.monitor_instance_type,
+                    instance_count=1,
+                    accept_type='text/csv',
+                    content_type='text/csv'
+                ),
+                explainability_config=sagemaker.clarify.SHAPConfig(
+                    baseline=[train_X.mean().tolist()],  # mean of training features as baseline
+                    num_samples=100,
+                    agg_method='mean_abs'
+                )
+            ),
+            depends_on=depends_on
+        )
+    
+        return mbt_baseline_step
