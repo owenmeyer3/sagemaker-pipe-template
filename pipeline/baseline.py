@@ -15,6 +15,7 @@ class Baseliner():
         self.me_monitor_dir=f'{data_dir_uri}/monitors/model-explainability'
         self.mbt_monitor_dir=f'{data_dir_uri}/monitors/batch'
         self.data_capture_dir=  f'{data_dir_uri}/capture'
+        self.ground_truth_dir=  f'{data_dir_uri}/ground-truth'
         
         self.monitor_instance_type=monitor_instance_type
 
@@ -215,6 +216,7 @@ class Baseliner():
                 volume_kms_key_id=None
             )
         )
+        
         monitoring_app_specification=sagemaker.core.shapes.shapes.MonitoringAppSpecification(
             image_uri=sagemaker.core.image_uris.retrieve(framework='model-monitor', region='us-east-1'), # required - the container to run
             # container_entrypoint=['...'],       # optional - override entrypoint
@@ -232,7 +234,8 @@ class Baseliner():
                             local_path='/opt/ml/processing/input', 
                             s3_uri='s3://omm-test-bucket/models/test/batch-output/'
                         )
-                    )]
+                    )
+                ]
             ),
             monitoring_resources=monitoring_resources, 
             monitoring_app_specification=monitoring_app_specification, 
@@ -252,7 +255,20 @@ class Baseliner():
 
 #################### MODEL QUALITY
 
-    def get_job_definition(self, sagemaker_session, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None):
+    def get_monitor_batch_transform_step(self, sagemaker_session, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None, depends_on=[]):
+        # def get_monitor_batch_transform_step(self, sagemaker_session, role, create_model_step, scope, writes={}, depends_on=[]):
+        # {
+        #     'ModelName': 'sagemaker-xgboost-2026-05-21-17-13-20-923',
+        #     'TransformInput': {'DataSource': {'S3DataSource': {'S3DataType': 'S3Prefix',
+        #         'S3Uri': 's3://omm-test-bucket/models/abalone/data/input/test/test_X.csv'}},
+        #     'ContentType': 'text/csv',
+        #     'SplitType': 'Line'},
+        #     'TransformOutput': {'S3OutputPath': 's3://omm-test-bucket/models/test/data/transformations/out',
+        #     'Accept': 'text/csv',
+        #     'AssembleWith': 'Line'},
+        #     'TransformResources': {'InstanceType': 'ml.m5.large', 'InstanceCount': 1}
+        # }
+
         batch_transform_input = sagemaker.core.shapes.shapes.BatchTransformInput(
             data_captured_destination_s3_uri=f'{self.data_capture_dir}',
             dataset_format=sagemaker.core.shapes.shapes.MonitoringDatasetFormat(csv=sagemaker.core.shapes.shapes.MonitoringCsvDatasetFormat(header=True)),
@@ -261,11 +277,11 @@ class Baseliner():
             s3_data_distribution_type='FullyReplicated', 
             features_attribute=','.join(self.features),
             inference_attribute=self.target,
-            probability_attribute=probability_attribute, 
-            probability_threshold_attribute=probability_threshold_attribute, 
-            exclude_features_attribute=exclude_features_attribute,
+            probability_attribute=probability_attribute,
+            probability_threshold_attribute=probability_threshold_attribute,
             start_time_offset="-PT2H",
             end_time_offset="-PT1H",
+            exclude_features_attribute=exclude_features_attribute,
             sagemaker_session=sagemaker_session
         )
 
@@ -277,6 +293,13 @@ class Baseliner():
                 volume_kms_key_id=None
             )
         )
+
+        return [batch_transform_input, monitoring_resources]
+    
+    def get_job_definition(self, sagemaker_session, monitoring_output, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None):
+
+        batch_transform_input, monitoring_resources=self.get_monitor_batch_transform_step(sagemaker_session)
+                                         
         monitoring_app_specification=sagemaker.core.shapes.shapes.MonitoringAppSpecification(
             image_uri=sagemaker.core.image_uris.retrieve(framework='model-monitor', region='us-east-1'), # required - the container to run
             # container_entrypoint=['...'],       # optional - override entrypoint
@@ -292,7 +315,7 @@ class Baseliner():
                     sagemaker.core.shapes.shapes.MonitoringOutput(
                         s3_output=sagemaker.core.shapes.shapes.MonitoringS3Output(
                             local_path='/opt/ml/processing/input', 
-                            s3_uri='s3://omm-test-bucket/models/test/batch-output/'
+                            s3_uri=monitoring_output
                         )
                     )]
             ),
@@ -314,7 +337,9 @@ class Baseliner():
             data_analysis_end_time="-PT2H"
             )
 
-    def get_batch_model_quality_step(self, sagemaker_session, transform_step, schedule_config, monitoring_job_definition, depends_on=[]):
+    def get_batch_model_quality_step(self, sagemaker_session, transform_step, schedule_config, depends_on=[]):
+
+        monitoring_job_definition=self.get_job_definition(sagemaker_session, self.mq_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
 
         model_dashboard_monitoring_schedule=sagemaker.core.shapes.shapes.ModelDashboardMonitoringSchedule(
             batch_transform_input=transform_step.arguments['TransformInput'],
@@ -339,8 +364,8 @@ class Baseliner():
             transform_step_args=transform_step.arguments,
             baseline_statistics=f'{self.mq_monitor_dir}/info/statistics.json',
             baseline_constraints=f'{self.mq_monitor_dir}/info/constraints.json',
-            output_s3_uri=f'{self.mq_monitor_dir}/transforms',
-            ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
+            output_s3_uri=f'{self.mq_monitor_dir}/reports',
+            ground_truth_input=f'{self.ground_truth_dir}/',  # ground truth labels
             fail_on_violation=False,
             depends_on=depends_on,
             sagemaker_session=sagemaker_session
@@ -349,7 +374,9 @@ class Baseliner():
         return mq_monitor_step
 
 #################### MODEL BIAS
-    def get_batch_model_bias_step(self, sagemaker_session, transform_step, role, schedule_config, monitoring_job_definition, depends_on=[]):
+    def get_batch_model_bias_step(self, sagemaker_session, transform_step, role, schedule_config, depends_on=[]):
+
+        monitoring_job_definition=self.get_job_definition(sagemaker_session, self.mb_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
 
         model_dashboard_monitoring_schedule=sagemaker.core.shapes.shapes.ModelDashboardMonitoringSchedule(
             batch_transform_input=transform_step.arguments['TransformInput'],
@@ -374,7 +401,7 @@ class Baseliner():
             transform_step_args=transform_step.arguments,
             baseline_statistics=f'{self.mb_monitor_dir}/info/statistics.json',
             baseline_constraints=f'{self.mb_monitor_dir}/info/constraints.json',
-            output_s3_uri=f'{self.mb_monitor_dir}/transforms',
+            output_s3_uri=f'{self.mb_monitor_dir}/reports',
             ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
             fail_on_violation=False,
             sagemaker_session=sagemaker_session
@@ -382,7 +409,9 @@ class Baseliner():
         return mb_monitor_step
 
 #################### DATA QUALITY
-    def get_batch_data_quality_step(self, sagemaker_session, transform_step, role, schedule_config, monitoring_job_definition, depends_on=[]):
+    def get_batch_data_quality_step(self, sagemaker_session, transform_step, role, schedule_config, depends_on=[]):
+
+        monitoring_job_definition=self.get_job_definition(sagemaker_session, self.dq_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
 
         model_dashboard_monitoring_schedule=sagemaker.core.shapes.shapes.ModelDashboardMonitoringSchedule(
             batch_transform_input=transform_step.arguments['TransformInput'],
@@ -406,8 +435,8 @@ class Baseliner():
             transform_step_args=transform_step.arguments,
             baseline_statistics=f'{self.dq_monitor_dir}/info/statistics.json',
             baseline_constraints=f'{self.dq_monitor_dir}/info/constraints.json',
-            output_s3_uri=f'{self.dq_monitor_dir}/transforms',
-            ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
+            output_s3_uri=f'{self.dq_monitor_dir}/reports',
+            ground_truth_input=f'{self.ground_truth_dir}/',  # ground truth labels
             fail_on_violation=False,
             sagemaker_session=sagemaker_session
         )
@@ -415,7 +444,9 @@ class Baseliner():
         return dq_monitor_step
 
 #################### DATA BIAS
-    def get_batch_data_bias_step(self, sagemaker_session, transform_step, role, schedule_config, monitoring_job_definition, depends_on=[]):
+    def get_batch_data_bias_step(self, sagemaker_session, transform_step, role, schedule_config, depends_on=[]):
+
+        monitoring_job_definition=self.get_job_definition(sagemaker_session, self.db_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
 
         model_dashboard_monitoring_schedule=sagemaker.core.shapes.shapes.ModelDashboardMonitoringSchedule(
             batch_transform_input=transform_step.arguments['TransformInput'],
@@ -440,14 +471,16 @@ class Baseliner():
             transform_step_args=transform_step.arguments,
             baseline_statistics=f'{self.db_monitor_dir}/info/statistics.json',
             baseline_constraints=f'{self.db_monitor_dir}/info/constraints.json',
-            output_s3_uri=f'{self.db_monitor_dir}/transforms',
-            ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
+            output_s3_uri=f'{self.db_monitor_dir}/reports',
+            ground_truth_input=f'{self.ground_truth_dir}/',  # ground truth labels
             fail_on_violation=False,
             sagemaker_session=sagemaker_session
         )
 
 #################### EXPLAINABILITY
-    def get_batch_model_explainabilty_step(self, sagemaker_session, transform_step, role, schedule_config, monitoring_job_definition, depends_on=[]):
+    def get_batch_model_explainabilty_step(self, sagemaker_session, transform_step, role, schedule_config, depends_on=[]):
+
+        monitoring_job_definition=self.get_job_definition(sagemaker_session, self.me_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
 
         model_dashboard_monitoring_schedule=sagemaker.core.shapes.shapes.ModelDashboardMonitoringSchedule(
             batch_transform_input=transform_step.arguments['TransformInput'],
@@ -472,8 +505,8 @@ class Baseliner():
             transform_step_args=transform_step.arguments,
             baseline_statistics=f'{self.me_monitor_dir}/info/statistics.json',
             baseline_constraints=f'{self.me_monitor_dir}/info/constraints.json',
-            output_s3_uri=f'{self.me_monitor_dir}/transforms',
-            ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
+            output_s3_uri=f'{self.me_monitor_dir}/reports',
+            ground_truth_input=f'{self.ground_truth_dir}/',  # ground truth labels
             fail_on_violation=False,
             sagemaker_session=sagemaker_session
         )

@@ -1,6 +1,6 @@
-from sagemaker.workflow.pipeline import Pipeline
-from sagemaker.workflow.parameters import ParameterString
-from sagemaker.workflow.monitor_batch_transform_step import MonitorBatchTransformStep
+from sagemaker.mlops.workflow.pipeline import Pipeline
+from sagemaker.core.workflow.parameters import ParameterString
+from sagemaker.mlops.workflow.monitor_batch_transform_step import MonitorBatchTransformStep
 import utils, baseline, boto3, sagemaker, argparse
 
 class CPipeline(Pipeline):
@@ -31,6 +31,7 @@ class CPipeline(Pipeline):
         data_dir=          f"{project_dir}/data"
         self.model_dir=         f"{project_dir}/model"
         self.data_capture_dir=  f'{data_dir}/capture'
+        self.transforms_dir=    f'{data_dir}/transforms'
         self.ground_truth_dir=  f'{data_dir}/ground-truth'
         self.train_file=        f'{data_dir}/input/train/train.csv'
         self.baseline_file=     f'{data_dir}/baseline/baseline.csv'
@@ -82,6 +83,7 @@ class CPipeline(Pipeline):
         super.__init(
             name=self.name,
             parameters=self.parameters,
+            region='us-east-1',
             steps=self.steps,
             sagemaker_session=self.sagemaker_session
             )
@@ -126,7 +128,7 @@ class CPipeline(Pipeline):
                 data_analysis_end_time="-PT2H"
             )
 
-            model_quality_step=self.baseline.get_batch_model_quality_step(self.sagemaker_session, batch_transform_step, schedule_config, job_definition, depends_on=[batch_transform_step])
+            model_quality_step=self.get_batch_model_quality_step(self.sagemaker_session, batch_transform_step, schedule_config, depends_on=[])
 
 
             return [create_model_step]
@@ -336,6 +338,9 @@ if __name__ == '__main__':
     import boto3
     import sagemaker
 
+    #$$python3 pipeline/pipeline.py --action deploy --deployment-type batch --model-package-group-name abalone --model-package-version 1 --pipe-name sagemaker-pipe-template --target-name rings --prediction-name rings_prediction --project-bucket omm-test-bucket --project-path 'models/abalone' --monitor-instance-type ml.m5.large
+
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--action',                   type=str, choices=['deploy', 'inference'], required=True)
     parser.add_argument('--deployment-type',          type=str, choices=['realtime',   'batch'], required=True)
@@ -351,12 +356,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # sagemaker_session = sagemaker.Session(boto_session=boto3.Session())
-    sagemaker_session = sagemaker.PipelineSession(boto_session=boto3.Session())
-    role = sagemaker.get_execution_role(sagemaker_session)
-
+    print('INIT')
+    sagemaker_session = sagemaker.PipelineSession(boto_session=boto3.Session(region_name='us-east-1'))
     model_package_group_name = ParameterString(name='ModelPackageGroupName')
     model_package_version = ParameterString(name='ModelPackageVersion', default_value='latest')
-    role = ParameterString(name='Role')
+    role = ParameterString(name='Role', default_value=sagemaker.get_execution_role(sagemaker_session)) 
+    print('INIT VARS')
 
     pipeline = CPipeline(
         sagemaker_session, 
