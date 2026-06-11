@@ -20,6 +20,12 @@ from sagemaker.core.image_uris import retrieve as retrieve_image
 from sagemaker.mlops.workflow.quality_check_step import ModelQualityCheckConfig, DataQualityCheckConfig
 from sagemaker.mlops.workflow.monitor_batch_transform_step import MonitorBatchTransformStep
 
+from sagemaker.mlops.workflow.quality_check_step import (
+    QualityCheckStep,
+    DataQualityCheckConfig
+)
+from sagemaker.mlops.workflow.check_job_config import CheckJobConfig
+
 
 class Baseliner():
 
@@ -60,15 +66,16 @@ class Baseliner():
 
         # Model Explainability → input features + predictions (uses SHAP values)
         baseline_full.drop(columns=[target_name]).to_csv(f'{self.me_monitor_dir}/baseline.csv', index=False, header=True)
+        print(f'self.train_file:{self.train_file}')
 
         train=pd.read_csv(self.train_file, header=None)
         train_X = train.iloc[:, 1:]
-        train_X.to_csv(self.train_file, index=False, header=False)
+        train_X.to_csv(self.train_X_file, index=False, header=False)
 
 
     def get_data_quality_step(self, role, depends_on=[]):
 
-        data_quality_monitor = DefaultModelMonitor(
+        check_job_config = CheckJobConfig(
             role=role,
             instance_count=1,
             instance_type=self.monitor_instance_type,
@@ -76,22 +83,75 @@ class Baseliner():
             max_runtime_in_seconds=1800,
             sagemaker_session=self.sagemaker_session
         )
-
-        dq_baseline_step = ProcessingStep(
-            name='DataQualityBaselineStep',
-            step_args=data_quality_monitor.suggest_baseline(
-                baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv',
-                dataset_format=DatasetFormat.csv(header=True),
-                output_s3_uri=f"{self.dq_monitor_dir}/info",
-            ),
-            depends_on=depends_on,
-            sagemaker_session=self.sagemaker_session
+        
+        data_quality_config = DataQualityCheckConfig(
+            baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv',
+            dataset_format=DatasetFormat.csv(header=True),
+            output_s3_uri=f'{self.dq_monitor_dir}/info'
         )
+        
+        dq_baseline_step = QualityCheckStep(
+            name='DataQualityBaselineStep',
+            quality_check_config=data_quality_config,
+            check_job_config=check_job_config,
+            skip_check=True,           # True for baseline creation
+            register_new_baseline=True, # register the new baseline
+            depends_on=depends_on
+        )
+
+        # data_quality_monitor = DefaultModelMonitor(
+        #     role=role,
+        #     instance_count=1,
+        #     instance_type=self.monitor_instance_type,
+        #     volume_size_in_gb=20,
+        #     max_runtime_in_seconds=1800,
+        #     sagemaker_session=self.sagemaker_session
+        # )
+
+        # print(data_quality_monitor.suggest_baseline(
+        #         baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv',
+        #         dataset_format=DatasetFormat.csv(header=True),
+        #         output_s3_uri=f"{self.dq_monitor_dir}/info",
+        #     ),)
+
+        # dq_baseline_step = ProcessingStep(
+        #     name='DataQualityBaselineStep',
+        #     step_args=data_quality_monitor.suggest_baseline(
+        #         baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv',
+        #         dataset_format=DatasetFormat.csv(header=True),
+        #         output_s3_uri=f"{self.dq_monitor_dir}/info",
+        #     ),
+        #     depends_on=depends_on
+        # )
 
         return dq_baseline_step
 
 
     def get_model_quality_step(self, role, target_name, prediction_name, depends_on=[]):
+
+        check_job_config = CheckJobConfig(
+            role=role,
+            instance_count=1,
+            instance_type=self.monitor_instance_type,
+            volume_size_in_gb=20,
+            max_runtime_in_seconds=1800,
+            sagemaker_session=self.sagemaker_session
+        )
+        
+        model_quality_config = ModelQualityCheckConfig(
+            baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv',
+            dataset_format=DatasetFormat.csv(header=True),
+            output_s3_uri=f'{self.dq_monitor_dir}/info'
+        )
+        
+        dq_baseline_step = QualityCheckStep(
+            name='DataQualityBaselineStep',
+            quality_check_config=data_quality_config,
+            check_job_config=check_job_config,
+            skip_check=True,           # True for baseline creation
+            register_new_baseline=True, # register the new baseline
+            depends_on=depends_on
+        )
 
         model_quality_monitor = ModelQualityMonitor(
             role=role,
@@ -114,8 +174,7 @@ class Baseliner():
                 wait=False,
                 logs=False
             ),
-            depends_on=depends_on,
-            sagemaker_session=self.sagemaker_session
+            depends_on=depends_on
         )
 
         return mq_baseline_step
@@ -156,8 +215,7 @@ class Baseliner():
                 wait=False,
                 logs=False
             ),
-            depends_on=depends_on,
-            sagemaker_session=self.sagemaker_session
+            depends_on=depends_on
         )
 
         return mb_baseline_step
@@ -193,8 +251,7 @@ class Baseliner():
                     agg_method='mean_abs'
                 )
             ),
-            depends_on=depends_on,
-            sagemaker_session=self.sagemaker_session
+            depends_on=depends_on
         )
 
         return me_baseline_step

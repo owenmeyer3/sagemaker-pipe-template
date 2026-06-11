@@ -7,6 +7,7 @@ from sagemaker.core.resources import Model
 from sagemaker.core.lambda_helper import Lambda
 from sagemaker.core.transformer import Transformer
 from sagemaker.core.inputs import TransformInput
+from sagemaker.core.shapes.shapes import ScheduleConfig, ContainerDefinition
 
 from sagemaker.mlops.workflow.pipeline import Pipeline
 from sagemaker.mlops.workflow.lambda_step import LambdaOutputTypeEnum, LambdaStep, LambdaOutput
@@ -15,34 +16,27 @@ from sagemaker.mlops.workflow.steps import TransformStep
 from sagemaker.mlops.workflow.lambda_step import LambdaOutputTypeEnum, LambdaStep, LambdaOutput
 from sagemaker.mlops.workflow.monitor_batch_transform_step import MonitorBatchTransformStep
 import utils, baseline, boto3, argparse
-
-
-
-
+import pandas as pd
 
 class CPipeline(Pipeline):
-    def __init__(self, sagemaker_session, name, model_package_group_name, model_package_version, target_name, prediction_name, project_bucket, project_path, role, action, deployment_type, monitor_instance_type='ml.m5.large', endpoint_instance_type='ml.m5.large'):
+    def __init__(self, sagemaker_session, name, model_name_param, model_package_arn_param, model_package_group_name_param, model_package_version_param, target_name, prediction_name, project_bucket, project_path, role_param, action, deployment_type, monitor_instance_type='ml.m5.large', endpoint_instance_type='ml.m5.large'):
 
+        self.pipe_name=name
         self.target_name=target_name
         self.prediction_name=prediction_name
-
-        self.model_name, self.model_package_arn = utils.create_model_object_from_registry(sagemaker_session.boto_session, model_package_group_name, role, model_package_version=model_package_version)
         self.sagemaker_session=sagemaker_session
-        self.name=name
-        self.model_package_group_name=model_package_group_name
-        self.model_package_version=model_package_version
-        self.target_name=target_name
-        self.prediction_name=prediction_name
+
+        self.model_name_param=model_name_param
+        self.model_package_arn_param=model_package_arn_param
+        self.model_package_group_name_param=model_package_group_name_param
+        self.model_package_version_param=model_package_version_param
+
         self.project_bucket=project_bucket
         self.project_path=project_path
-        self.role=role
+        self.role_param=role_param
         self.monitor_instance_type=monitor_instance_type
         self.endpoint_instance_type=endpoint_instance_type
         self.model_image_uri=retrieve_image('xgboost', 'us-east-1', version='1.5-1')
-
-        # model_package_group_name = ParameterString(name='ModelPackageGroupName')
-        # model_package_version = ParameterString(name='ModelPackageVersion', default_value='latest')
-        # role = ParameterString(name='Role')
 
         project_dir=       f's3://{project_bucket}/{project_path}'
         data_dir=          f"{project_dir}/data"
@@ -50,12 +44,15 @@ class CPipeline(Pipeline):
         self.data_capture_dir=  f'{data_dir}/capture'
         self.transforms_dir=    f'{data_dir}/transforms'
         self.ground_truth_dir=  f'{data_dir}/ground-truth'
-        self.train_file=        f'{data_dir}/input/train/train.csv'
+    
         self.baseline_file=     f'{data_dir}/baseline/baseline.csv'
         self.baseline_pred_file=f'{data_dir}/baseline/baseline_pred.csv'
-        self.train_X_file=      f'{data_dir}/monitors/model-explainability/train_X.csv'
+        self.baseline_X_file   =f'{data_dir}/input/test/test_X.csv'
+        self.train_file=        f'{data_dir}/input/train/train.csv'
 
-        self.baseliner = baseline.Baseliner(self.model_name, data_dir, self.baseline_file, self.train_file, monitor_instance_type, sagemaker_session)
+   
+
+        self.baseliner = baseline.Baseliner(model_name_param.to_string(), data_dir, self.baseline_file, self.train_file, monitor_instance_type, sagemaker_session)
 
         self.steps = []
         self.parameters = []
@@ -70,11 +67,11 @@ class CPipeline(Pipeline):
                 deployment_type=deployment_type
             )
             self.parameters=[
-                self.model_package_group_name,
-                self.model_package_version,
+                self.model_package_group_name_param,
+                self.model_package_version_param,
                 self.project_bucket,
                 self.project_path,
-                self.role
+                self.role_param
             ]
         else:
             pass
@@ -98,16 +95,16 @@ class CPipeline(Pipeline):
             deploy_endpoint_step=self.get_deploy_endpoint_step(depends_on=[create_model_step])
 
             data_quality_step = self.baseliner.get_data_quality_step(
-                self.sagemaker_session, self.role, depends_on=[deploy_endpoint_step]
+                self.role_param.default_value, depends_on=[deploy_endpoint_step]
             )
             model_quality_step = self.baseliner.get_model_quality_step(
-                self.sagemaker_session, self.role, self.target_name, self.prediction_name, depends_on=[deploy_endpoint_step]
+                self.role_param.default_value, self.target_name, self.prediction_name, depends_on=[deploy_endpoint_step]
             )
             model_bias_step = self.baseliner.get_model_bias_step(
-                self.sagemaker_session, self.role, self.target_name, self.prediction_name, depends_on=[deploy_endpoint_step]
+                self.role_param.default_value, self.target_name, self.prediction_name, depends_on=[deploy_endpoint_step]
             )
             model_explainability_step = self.baseliner.get_model_explainability_step(
-                self.sagemaker_session, self.role, depends_on=[deploy_endpoint_step]
+                self.role_param.default_value, depends_on=[deploy_endpoint_step]
             )
 
             ssm_step = self.get_ssm_step(self.name, writes={}, depends_on=[])
@@ -117,7 +114,7 @@ class CPipeline(Pipeline):
         elif deployment_type == 'batch':
             create_model_step = self.get_batch_create_step()
 
-            batch_transform_step=self.get_batch_transform_step(self.train_X_file, depends_on=[create_model_step])
+            batch_transform_step=self.get_batch_transform_step(self.baseline_X_file, depends_on=[create_model_step])
 
             job_definition=self.baseline.get_job_definition(self.sagemaker_session, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
 
@@ -140,7 +137,7 @@ class CPipeline(Pipeline):
         # make create model step
         create_model_from_registry = Lambda(
             function_name='CreateModelFromRegistry',
-            execution_role_arn=self.role,
+            execution_role_arn=self.role_param.default_value,
             script='scripts/create_model_from_registry.py',  # path to your file
             handler='create_model_from_registry.handler',    # filename.function_name
             timeout=60,
@@ -150,9 +147,9 @@ class CPipeline(Pipeline):
             name='CreateModelStep',
             lambda_func=create_model_from_registry,
             inputs={
-                'model_package_group_name': self.model_package_group_name,
-                'model_package_version': self.model_package_version,
-                'role': self.role
+                'model_package_group_name': self.model_package_group_name_param,
+                'model_package_version': self.model_package_version_param,
+                'role': self.role_param
             },
             outputs=[
                 LambdaOutput(
@@ -170,25 +167,55 @@ class CPipeline(Pipeline):
 
     def get_batch_create_step(self):
 
-        model = Model(
-            image_uri=self.model_image_uri,
-            model_data=self.model_package_arn,  # from registry
-            role=self.role,
-            sagemaker_session=self.sagemaker_session
+        # model = Model(
+        #     image_uri=self.model_image_uri,
+        #     model_data=self.model_package_arn,  # from registry
+        #     role=self.role,
+        #     sagemaker_session=self.sagemaker_session
+        # )
+
+            # model_name: StrPipeVar
+            # primary_container: Optional[ContainerDefinition] = Unassigned()
+            # containers: Optional[List[ContainerDefinition]] = Unassigned()
+            # inference_execution_config: Optional[InferenceExecutionConfig] = Unassigned()
+            # execution_role_arn: Optional[StrPipeVar] = Unassigned()
+            # vpc_config: Optional[VpcConfig] = Unassigned()
+            # creation_time: Optional[datetime.datetime] = Unassigned()
+            # model_arn: Optional[StrPipeVar] = Unassigned()
+            # enable_network_isolation: Optional[bool] = Unassigned()
+            # deployment_recommendation: Optional[DeploymentRecommendation] = Unassigned()
+
+        
+        _model_name=self.model_name_param.default_value
+        _role=self.role_param.default_value
+        _model_package_arn=self.model_package_arn_param.default_value
+
+        print(_model_name)
+        print(_role)
+        print(_model_package_arn)
+
+
+        model = Model.create(
+            model_name=self.model_name_param.default_value,
+            execution_role_arn=self.role_param.default_value,
+            containers=[
+                ContainerDefinition(model_package_name=self.model_package_group_name_param)
+            ]
         )
+
+        print(model)
 
         create_model_step = ModelStep(
             name='CreateModelStep',
-            step_args=model.create(
-                instance_type=self.endpoint_instance_type
-            ),
-            sagemaker_session=self.sagemaker_session
+            step_args=model,
+            sagemaker_session=self.sagemaker_session,
+            region='us-east-1'
         )
         
         # make create model step
         create_model_from_registry = Lambda(
             function_name='CreateModelFromRegistry',
-            execution_role_arn=self.role,
+            execution_role_arn=self.role_param.default_value,
             script='scripts/create_model_from_registry.py',  # path to your file
             handler='create_model_from_registry.handler',    # filename.function_name
             timeout=60,
@@ -198,9 +225,9 @@ class CPipeline(Pipeline):
             name='CreateModelStep',
             lambda_func=create_model_from_registry,
             inputs={
-                'model_package_group_name': self.model_package_group_name,
-                'model_package_version': self.model_package_version,
-                'role': self.role
+                'model_package_group_name': self.model_package_group_name_param,
+                'model_package_version': self.model_package_version_param,
+                'role': self.role_param
             },
             outputs=[
                 LambdaOutput(
@@ -214,15 +241,15 @@ class CPipeline(Pipeline):
             ],
             sagemaker_session=self.sagemaker_session
         )
-        create_model_step=None
+        # create_model_step=None
         return create_model_step 
 
 
-    def get_deploy_endpoint_step(self, role, depends_on=[]):
+    def get_deploy_endpoint_step(self, depends_on=[]):
             
         deploy_endpoint_lambda = Lambda(
             function_name='DeployEndpoint',
-            execution_role_arn=role,
+            execution_role_arn=self.role_param.default_value,
             script='scripts/deploy_endpoint.py',
             handler='deploy_endpoint.handler',
             timeout=600,  # endpoints take time to deploy
@@ -232,8 +259,8 @@ class CPipeline(Pipeline):
             name='DeployEndpointStep',
             lambda_func=deploy_endpoint_lambda,
             inputs={
-                'model_name': self.model_name,
-                'endpoint_name': f'{self.model_package_group_name}-{self.model_package_version}-abalone-endpoint',
+                'model_name': self.model_name_param,
+                'endpoint_name': f'{self.model_package_group_name_param.default_value}-{self.model_package_version_param.default_value}-abalone-endpoint',
                 'instance_type': self.endpoint_instance_type,
                 'data_capture_path':self.data_capture_dir
             },
@@ -243,8 +270,7 @@ class CPipeline(Pipeline):
                     output_type=LambdaOutputTypeEnum.String
                 )
             ],
-            depends_on=depends_on,
-            sagemaker_session=self.sagemaker_session
+            depends_on=depends_on
         )
         return deploy_endpoint_step  
 
@@ -281,11 +307,11 @@ class CPipeline(Pipeline):
 
         return transform_step
 
-    def get_ssm_step(self, role, scope, writes={}, depends_on=[]):
+    def get_ssm_step(self, scope, writes={}, depends_on=[]):
             
         read_write_lambda = Lambda(
             function_name='SSMReadWrite',
-            execution_role_arn=role,
+            execution_role_arn=self.role_param.default,
             script='scripts/ssm_read_write.py',
             handler='ssm_read_write.handler',
             timeout=30,  # endpoints take time to deploy
@@ -350,35 +376,43 @@ def main():
     # sagemaker_session = sagemaker.Session(boto_session=boto3.Session())
     print('INIT')
     sagemaker_session = PipelineSession(boto_session=boto3.Session(region_name='us-east-1'))
+    role_param = ParameterString(name='Role', default_value=get_execution_role(sagemaker_session)) 
 
-    model_package_group_name = ParameterString(name='ModelPackageGroupName')
-    model_package_version = ParameterString(name='ModelPackageVersion', default_value='latest')
-    role = ParameterString(name='Role', default_value=get_execution_role(sagemaker_session)) 
-    print('INIT VARS')
+    model_package_group_name_param = ParameterString(name='ModelPackageGroupName', default_value=args.model_package_group_name)
+    model_package_version_param = ParameterString(name='ModelPackageVersion', default_value=args.model_package_version)
+    
+    model_name, model_package_arn = utils.create_model_object_from_registry(sagemaker_session.boto_session, model_package_group_name_param.default_value, role_param.default_value, model_package_version=model_package_version_param.default_value)
+    model_name_param = ParameterString(name='ModelName', default_value=model_name) 
+    model_package_arn_param = ParameterString(name='ModelName', default_value=model_package_arn) 
+
+    
+
 
     pipeline = CPipeline(
         sagemaker_session, 
-        args.pipe_name, 
-        args.model_package_group_name, 
-        args.model_package_version, 
+        args.pipe_name,
+        model_name_param, # param
+        model_package_arn_param, # param
+        model_package_group_name_param,  # param
+        model_package_version_param,   # param
         args.target_name, 
         args.prediction_name, 
         args.project_bucket, 
         args.project_path, 
-        role, 
+        role_param, 
         args.action, 
         args.deployment_type, 
         monitor_instance_type=args.monitor_instance_type
     )
 
-    # pipeline.upsert(role_arn=role)
+    # pipeline.upsert(role_arn=role_param.default_value)
     
     # execution = pipeline.start(
-        # Override
+    #     # Override
     #     parameters={
-    #         'ModelPackageGroupName': pipeline.model_package_group_name,
-    #         'ModelPackageVersion': pipeline.model_package_version,
-    #         'Role': pipeline.role
+    #         'ModelPackageGroupName': model_package_group_name_param,
+    #         'ModelPackageVersion': model_package_version_param,
+    #         'Role': role_param
     #     }
     # )
     
@@ -389,10 +423,15 @@ def main():
     #     print("Execution complete")
 
 def test_main():
+    train_file='s3://omm-test-bucket/models/abalone/data/input/train/train.csv'
+    train=pd.read_csv(train_file, header=None) 
+
 
     exit()
 
-# python3 pipeline/pipeline.py --action deploy --deployment-type batch --model-package-group-name abalone --model-package-version 1 --pipe-name sagemaker-pipe-template --target-name rings --prediction-name rings_prediction --project-bucket omm-test-bucket --project-path 'models/abalone' --monitor-instance-type ml.m5.large
+# python3 pipeline/pipeline.py --action deploy --deployment-type realtime --model-package-group-name abalone --model-package-version 1 --pipe-name sagemaker-pipe-template --target-name rings --prediction-name rings_prediction --project-bucket omm-test-bucket --project-path "models/abalone" --monitor-instance-type "ml.m5.large"
+
+# python3 pipeline/pipeline.py --action deploy --deployment-type batch --model-package-group-name abalone --model-package-version 1 --pipe-name sagemaker-pipe-template --target-name rings --prediction-name rings_prediction --project-bucket omm-test-bucket --project-path "models/abalone" --monitor-instance-type "ml.m5.large"
 
 if __name__ == '__main__':
     main()
