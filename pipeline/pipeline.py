@@ -14,7 +14,7 @@ from sagemaker.mlops.workflow.model_step import ModelStep
 from sagemaker.mlops.workflow.steps import TransformStep
 from sagemaker.mlops.workflow.lambda_step import LambdaOutputTypeEnum, LambdaStep, LambdaOutput
 from sagemaker.mlops.workflow.monitor_batch_transform_step import MonitorBatchTransformStep
-import utils, baseline, boto3, argparse, monitor
+import utils, baseline, boto3, argparse, monitor, json
 import pandas as pd
 
 class CPipeline(Pipeline):
@@ -60,7 +60,15 @@ class CPipeline(Pipeline):
             self.steps = self.get_deploy_steps(        
                 deployment_type=deployment_type
             )
-            self.parameters=[]
+            self.parameters=[
+                self.model_package_arn_param,
+                self.model_name_param,
+                self.model_package_group_name_param,
+                self.model_package_version_param,
+                self.project_bucket,
+                self.project_path,
+                self.role_param
+            ]
 
         elif action == 'inference':
             self.steps = self.get_inference_steps(        
@@ -109,9 +117,9 @@ class CPipeline(Pipeline):
                 self.role_param.default_value, depends_on=[deploy_endpoint_step]
             )
 
-            ssm_step = self.get_ssm_step(self.name, writes={}, depends_on=[])
+            # ssm_step = self.get_ssm_step(self.name, writes={}, depends_on=[])
 
-            return [create_model_step, deploy_endpoint_step, data_quality_step, data_bias_step, model_quality_step, model_bias_step, model_explainability_step, ssm_step]
+            return [create_model_step, deploy_endpoint_step, data_quality_step, data_bias_step, model_quality_step, model_bias_step, model_explainability_step]#, ssm_step]
         
         elif deployment_type == 'batch':
             create_model_step = self.get_batch_create_step()
@@ -308,32 +316,32 @@ class CPipeline(Pipeline):
 
         return transform_step
 
-    def get_ssm_step(self, scope, writes={}, depends_on=[]):
+    # def get_ssm_step(self, scope, writes={}, depends_on=[]):
             
-        read_write_lambda = Lambda(
-            function_name='SSMReadWrite',
-            execution_role_arn=self.role_param.default_value,
-            script='scripts/ssm_read_write.py',
-            handler='ssm_read_write.handler',
-            timeout=30,  # endpoints take time to deploy
-        )
+    #     read_write_lambda = Lambda(
+    #         function_name='SSMReadWrite',
+    #         execution_role_arn=self.role_param.default_value,
+    #         script='scripts/ssm_read_write.py',
+    #         handler='ssm_read_write.handler',
+    #         timeout=30,  # endpoints take time to deploy
+    #     )
 
-        ssm_step = LambdaStep(
-            name='SSMReadWriteStep',
-            lambda_func=read_write_lambda,
-            inputs={
-                'writes':writes,
-                'scope': scope
-            },
-            outputs=[
-                LambdaOutput(
-                    output_name='params',
-                    output_type=LambdaOutputTypeEnum.String
-                )
-            ],
-            depends_on=depends_on
-        )
-        return ssm_step    
+    #     ssm_step = LambdaStep(
+    #         name='SSMReadWriteStep',
+    #         lambda_func=read_write_lambda,
+    #         inputs={
+    #             'writes':writes,
+    #             'scope': scope
+    #         },
+    #         outputs=[
+    #             LambdaOutput(
+    #                 output_name='params',
+    #                 output_type=LambdaOutputTypeEnum.String
+    #             )
+    #         ],
+    #         depends_on=depends_on
+    #     )
+    #     return ssm_step    
     
 
     
@@ -373,19 +381,19 @@ def main():
     parser.add_argument('--wait',                     action='store_true', default=False) # False
     args = parser.parse_args()
 
-    # sagemaker_session = sagemaker.Session(boto_session=boto3.Session())
     print('INIT')
     sagemaker_session = PipelineSession(boto_session=boto3.Session(region_name='us-east-1'))
-    role_param = ParameterString(name='Role', default_value=get_execution_role(sagemaker_session)) 
 
+    iam_role = get_execution_role(sagemaker_session)
+    role_param = ParameterString(name='Role', default_value=iam_role)
+
+    print(f"args.model_package_group_name {args.model_package_group_name}")
     model_package_group_name_param = ParameterString(name='ModelPackageGroupName', default_value=args.model_package_group_name)
     model_package_version_param = ParameterString(name='ModelPackageVersion', default_value=args.model_package_version)
     
     model_name, model_package_arn = utils.create_model_object_from_registry(sagemaker_session.boto_session, model_package_group_name_param.default_value, role_param.default_value, model_package_version=model_package_version_param.default_value)
     model_name_param = ParameterString(name='ModelName', default_value=model_name) 
-    model_package_arn_param = ParameterString(name='ModelName', default_value=model_package_arn) 
-
-    
+    model_package_arn_param = ParameterString(name='ModelPackageArn', default_value=model_package_arn) 
 
 
     pipeline = CPipeline(
@@ -405,26 +413,55 @@ def main():
         monitor_instance_type=args.monitor_instance_type
     )
 
-    # pipeline.upsert(role_arn=role_param.default_value)
+    print(f"role_param.default_value {role_param.default_value}")
+
+    pipeline_definition = json.loads(pipeline.definition())
+    print(json.dumps(pipeline_definition, indent=2))
+    pipeline.upsert(role_arn=role_param.default_value)
     
-    # execution = pipeline.start(
-    #     # Override
-    #     parameters={
-    #         'ModelPackageGroupName': model_package_group_name_param,
-    #         'ModelPackageVersion': model_package_version_param,
-    #         'Role': role_param
-    #     }
-    # )
+    execution = pipeline.start(
+        # Override
+        parameters={
+            'ModelPackageGroupName': model_package_group_name_param.default_value,
+            'ModelPackageVersion': model_package_version_param.default_value,
+            'ModelPackageArn': model_package_arn_param.default_value,
+            'ModelName': model_name_param.default_value,
+            'Role': role_param.default_value
+        }
+    )
     
-    # print(f"Execution started: {execution.arn}")
+    print(f"Execution started: {execution.arn}")
     
-    # if args.wait:
-    #     execution.wait()
-    #     print("Execution complete")
+    if args.wait:
+        execution.wait()
+        print("Execution complete")
 
 def test_main():
-    train_file='s3://omm-test-bucket/models/abalone/data/input/train/train.csv'
-    train=pd.read_csv(train_file, header=None) 
+    sm_client = boto3.client('sagemaker', region_name='us-east-1')
+
+    # List all pipelines
+    response = sm_client.list_pipelines()
+    for pipeline in response['PipelineSummaries']:
+        print(pipeline['PipelineName'])
+    
+    # delet monitors and endpoint
+    import boto3
+    sm_client = boto3.client('sagemaker', region_name='us-east-1')
+    endpoint_name='abalone-endpoint'
+    # List and delete monitoring schedules
+    schedules = sm_client.list_monitoring_schedules(
+        EndpointName=endpoint_name
+    )
+
+    for schedule in schedules['MonitoringScheduleSummaries']:
+        sm_client.delete_monitoring_schedule(
+            MonitoringScheduleName=schedule['MonitoringScheduleName']
+        )
+        print(f"Deleted schedule: {schedule['MonitoringScheduleName']}")
+
+    # Then delete endpoint
+    sm_client.delete_endpoint(EndpointName=endpoint_name)
+    print("Endpoint deleted")
 
 
     exit()

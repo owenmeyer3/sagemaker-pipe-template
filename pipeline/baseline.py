@@ -49,10 +49,13 @@ class Baseliner():
         # Data Quality    → input features only
         baseline_full.drop(columns=[target_name, prediction_name]).to_csv(f'{self.dq_monitor_dir}/baseline.csv', index=False, header=True)
 
+        # Data Bias    → input features + target
+        baseline_full.drop(columns=[prediction_name]).to_csv(f'{self.dq_monitor_dir}/baseline.csv', index=False, header=True)
+
         # Model Quality   → predictions + ground truth labels
         baseline_full[[target_name, prediction_name]].to_csv(f'{self.mq_monitor_dir}/baseline.csv', index=False, header=True)
 
-        # Model Bias      → features + predictions + labels
+        # Model Bias → features + predictions + labels
         baseline_full.to_csv(f'{self.mb_monitor_dir}/baseline.csv', index=False, header=True)
 
         # Model Explainability → input features + predictions (uses SHAP values)
@@ -122,7 +125,7 @@ class Baseliner():
     def get_model_quality_step(self, role, depends_on=[]):
 
         mq_baseline_step = QualityCheckStep(
-            name='DataQualityBaselineStep',
+            name='ModelQualityBaselineStep',
             
             quality_check_config=ModelQualityCheckConfig(
                 problem_type="Regression",
