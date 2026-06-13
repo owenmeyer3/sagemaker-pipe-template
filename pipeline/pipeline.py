@@ -10,18 +10,17 @@ from sagemaker.core.inputs import TransformInput
 from sagemaker.core.shapes.shapes import ScheduleConfig, ContainerDefinition
 
 from sagemaker.mlops.workflow.pipeline import Pipeline
-from sagemaker.mlops.workflow.lambda_step import LambdaOutputTypeEnum, LambdaStep, LambdaOutput
 from sagemaker.mlops.workflow.model_step import ModelStep
 from sagemaker.mlops.workflow.steps import TransformStep
 from sagemaker.mlops.workflow.lambda_step import LambdaOutputTypeEnum, LambdaStep, LambdaOutput
 from sagemaker.mlops.workflow.monitor_batch_transform_step import MonitorBatchTransformStep
-import utils, baseline, boto3, argparse
+import utils, baseline, boto3, argparse, monitor
 import pandas as pd
 
 class CPipeline(Pipeline):
     def __init__(self, sagemaker_session, name, model_name_param, model_package_arn_param, model_package_group_name_param, model_package_version_param, target_name, prediction_name, project_bucket, project_path, role_param, action, deployment_type, monitor_instance_type='ml.m5.large', endpoint_instance_type='ml.m5.large'):
 
-        self.pipe_name=name
+        self.name=name
         self.target_name=target_name
         self.prediction_name=prediction_name
         self.sagemaker_session=sagemaker_session
@@ -53,6 +52,7 @@ class CPipeline(Pipeline):
    
 
         self.baseliner = baseline.Baseliner(model_name_param.to_string(), data_dir, self.baseline_file, self.train_file, monitor_instance_type, sagemaker_session)
+        self.monitor_maker = monitor.MonitorMaker(model_name_param.to_string(), data_dir, self.baseline_file, self.train_file, monitor_instance_type, sagemaker_session)
 
         self.steps = []
         self.parameters = []
@@ -76,10 +76,9 @@ class CPipeline(Pipeline):
         else:
             pass
 
-        super.__init(
+        super().__init__(
             name=self.name,
             parameters=self.parameters,
-            region='us-east-1',
             steps=self.steps,
             sagemaker_session=self.sagemaker_session
             )
@@ -97,11 +96,14 @@ class CPipeline(Pipeline):
             data_quality_step = self.baseliner.get_data_quality_step(
                 self.role_param.default_value, depends_on=[deploy_endpoint_step]
             )
+            data_bias_step = self.baseliner.get_data_bias_step(
+                self.role_param.default_value, depends_on=[deploy_endpoint_step]
+            )
             model_quality_step = self.baseliner.get_model_quality_step(
-                self.role_param.default_value, self.target_name, self.prediction_name, depends_on=[deploy_endpoint_step]
+                self.role_param.default_value, depends_on=[deploy_endpoint_step]
             )
             model_bias_step = self.baseliner.get_model_bias_step(
-                self.role_param.default_value, self.target_name, self.prediction_name, depends_on=[deploy_endpoint_step]
+                self.role_param.default_value, depends_on=[deploy_endpoint_step]
             )
             model_explainability_step = self.baseliner.get_model_explainability_step(
                 self.role_param.default_value, depends_on=[deploy_endpoint_step]
@@ -109,7 +111,7 @@ class CPipeline(Pipeline):
 
             ssm_step = self.get_ssm_step(self.name, writes={}, depends_on=[])
 
-            return [create_model_step, deploy_endpoint_step, data_quality_step, model_quality_step, model_bias_step, model_explainability_step, ssm_step]
+            return [create_model_step, deploy_endpoint_step, data_quality_step, data_bias_step, model_quality_step, model_bias_step, model_explainability_step, ssm_step]
         
         elif deployment_type == 'batch':
             create_model_step = self.get_batch_create_step()
@@ -238,8 +240,7 @@ class CPipeline(Pipeline):
                     output_name='model_package_arn',
                     output_type=LambdaOutputTypeEnum.String
                 )
-            ],
-            sagemaker_session=self.sagemaker_session
+            ]
         )
         # create_model_step=None
         return create_model_step 
@@ -311,7 +312,7 @@ class CPipeline(Pipeline):
             
         read_write_lambda = Lambda(
             function_name='SSMReadWrite',
-            execution_role_arn=self.role_param.default,
+            execution_role_arn=self.role_param.default_value,
             script='scripts/ssm_read_write.py',
             handler='ssm_read_write.handler',
             timeout=30,  # endpoints take time to deploy
@@ -330,8 +331,7 @@ class CPipeline(Pipeline):
                     output_type=LambdaOutputTypeEnum.String
                 )
             ],
-            depends_on=depends_on,
-            sagemaker_session=self.sagemaker_session
+            depends_on=depends_on
         )
         return ssm_step    
     
