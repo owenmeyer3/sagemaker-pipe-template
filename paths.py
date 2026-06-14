@@ -1,32 +1,39 @@
-data_bucket='omm-test-bucket'
-project_path = 'models/abalone'
 
-train_dir=     f's3://{data_bucket}/{project_path}/data/input/train'
-validation_dir=f's3://{data_bucket}/{project_path}/data/input/validation'
-test_dir=      f's3://{data_bucket}/{project_path}/data/input/test'
-baseline_dir=  f's3://{data_bucket}/{project_path}/data/baseline'
+class Paths():
+    def __init__(self, bucket_name, project_name, model_prefix):
+        self.project_dir=f's3://{bucket_name}/{project_name}/models/{model_prefix}'
+        self.data_dir=f'{self.project_dir}/data'
+        self.temp_data_dir=f'{self.project_dir}/data/temp'
+        self.model_dir=f'{self.project_dir}/model'
 
-# Training
-train_file=     f'{train_dir}/train.csv'
-validation_file=f'{validation_dir}/validation.csv'
-test_file=      f'{test_dir}/test.csv'
-test_X_file=    f'{test_dir}/test_X.csv'
-test_y_file=    f'{test_dir}/test_y.csv'
-baseline_file=  f'{baseline_dir}/baseline.csv'
-baseline_X_file=f'{baseline_dir}/baseline_X.csv'
-batch_in_dir=   f's3://{data_bucket}/{project_path}/data/batch-input'
-batch_out_dir=  f's3://{data_bucket}/{project_path}/data/batch-output'
-baseline_model_out_file= f'{batch_out_dir}/baseline_X.csv.out'
-baseline_pred_file=f'{baseline_dir}/baseline_pred.csv'
-model_dir=      f's3://{data_bucket}/{project_path}/model'
+        # model inputs
+        self.train_dir=f'{self.data_dir}/input/train'
+        self.validation_dir=f'{self.data_dir}/input/validation'
+        self.test_dir=f'{self.data_dir}/input/test'
+        self.train_file=f'{self.train_dir}/train.csv'
+        self.validation_file=f'{self.validation_dir}/validation.csv'
+        self.test_file=f'{self.test_dir}/test.csv'
+        self.test_X_file=f'{self.test_dir}/test_X.csv'
+        self.test_y_file=f'{self.test_dir}/test_y.csv'
 
-# Deploy
-data_capture_dir=  f's3://{data_bucket}/{project_path}/data/capture'
-ground_truth_dir=  f's3://{data_bucket}/{project_path}/data/ground-truth'
+        # baselining
+        self.baseline_dir=  f'{self.data_dir}/baseline'
+        self.baseline_file=  f'{self.baseline_dir}/baseline.csv'
+        self.baseline_X_file=f'{self.baseline_dir}/baseline_X.csv'
+        self.baseline_model_out_file= f'{self.temp_data_dir}/baseline_X.csv.out'
 
-# Monitors
-monitors_dir=  f's3://{data_bucket}/{project_path}/data/monitors'
-dq_monitor_dir=f'{monitors_dir}/data-quality'
-mq_monitor_dir=f'{monitors_dir}/model-quality'
-mb_monitor_dir=f'{monitors_dir}/model-bias'
-me_monitor_dir=f'{monitors_dir}/model-explainability'
+
+        # Batch
+        self.batch_in_dir=   f'{self.data_dir}/batch-input'
+        self.batch_out_dir=  f'{self.data_dir}/batch-output'
+
+        # Deploy
+        self.data_capture_dir=  f'{self.data_dir}/capture'
+        self.ground_truth_dir=  f'{self.data_dir}/ground-truth'
+
+        # Monitors
+        self.monitors_dir=  f'{self.data_dir}/monitors'
+        self.dq_monitor_dir=f'{self.monitors_dir}/data-quality'
+        self.mq_monitor_dir=f'{self.monitors_dir}/model-quality'
+        self.mb_monitor_dir=f'{self.monitors_dir}/model-bias'
+        self.me_monitor_dir=f'{self.monitors_dir}/model-explainability'

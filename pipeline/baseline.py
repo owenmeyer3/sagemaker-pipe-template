@@ -60,21 +60,37 @@ class Baseliner():
 
         # Model Explainability → input features + predictions (uses SHAP values)
         baseline_full.drop(columns=[target_name]).to_csv(f'{self.me_monitor_dir}/baseline.csv', index=False, header=True)
-        print(f'self.train_file:{self.train_file}')
 
         train=pd.read_csv(self.train_file, header=None)
         train_X = train.iloc[:, 1:]
         train_X.to_csv(self.train_X_file, index=False, header=False)
 
 
-    def get_data_quality_step(self, role, depends_on=[]):
+    def get_data_quality_step(self, action, role, depends_on=[]):
+
+        if action == 'deploy':
+            name='DataQualityBaselineStep'
+            baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv',
+            output_s3_uri=f'{self.dq_monitor_dir}/info'
+            skip_check=True
+            register_new_baseline=True
+            supplied_baseline_statistics=None,
+            supplied_baseline_constraints=None,
+        else:
+            name='DataQualityMonitorStep'
+            baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv',
+            output_s3_uri=f'{self.dq_monitor_dir}/check_output'
+            skip_check=False
+            register_new_baseline=False
+            supplied_baseline_statistics=f'{self.dq_monitor_dir}/info/constraints.json',
+            supplied_baseline_constraints=f'{self.dq_monitor_dir}/info/statistics.json',
 
         dq_baseline_step = QualityCheckStep(
-            name='DataQualityBaselineStep',
+            name=name,
             quality_check_config=DataQualityCheckConfig(
-                baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv',
+                baseline_dataset=baseline_dataset,
                 dataset_format=DatasetFormat.csv(header=True),
-                output_s3_uri=f'{self.dq_monitor_dir}/info'
+                output_s3_uri=output_s3_uri
             ),
             check_job_config=CheckJobConfig(
                 role=role,
@@ -84,10 +100,13 @@ class Baseliner():
                 max_runtime_in_seconds=1800,
                 sagemaker_session=self.sagemaker_session
             ),
-            skip_check=True,           # True for baseline creation
-            register_new_baseline=True, # register the new baseline
+            skip_check=skip_check,
+            register_new_baseline=register_new_baseline,
+            supplied_baseline_statistics=supplied_baseline_statistics,
+            supplied_baseline_constraints=supplied_baseline_constraints,
             depends_on=depends_on
         )
+       
 
         return dq_baseline_step
 

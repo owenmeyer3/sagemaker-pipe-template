@@ -13,6 +13,40 @@ from sagemaker.mlops.workflow.monitor_batch_transform_step import MonitorBatchTr
 from sagemaker.mlops.workflow.quality_check_step import QualityCheckStep, DataQualityCheckConfig
 from sagemaker.mlops.workflow.check_job_config import CheckJobConfig
 
+# def get_monitor_batch_transform_step(self, sagemaker_session, role, create_model_step, scope, writes={}, depends_on=[]):
+# {
+#     'ModelName': 'sagemaker-xgboost-2026-05-21-17-13-20-923',
+#     'TransformInput': {'DataSource': {'S3DataSource': {'S3DataType': 'S3Prefix',
+#         'S3Uri': 's3://omm-test-bucket/models/abalone/data/input/test/test_X.csv'}},
+#     'ContentType': 'text/csv',
+#     'SplitType': 'Line'},
+#     'TransformOutput': {'S3OutputPath': 's3://omm-test-bucket/models/test/data/transformations/out',
+#     'Accept': 'text/csv',
+#     'AssembleWith': 'Line'},
+#     'TransformResources': {'InstanceType': 'ml.m5.large', 'InstanceCount': 1}
+# }
+# def get_monitor_batch_transform_step(self, sagemaker_session, role, create_model_step, scope, writes={}, depends_on=[]):
+# {
+#     'ModelName': 'sagemaker-xgboost-2026-05-21-17-13-20-923',
+#     'TransformInput': {'DataSource': {'S3DataSource': {'S3DataType': 'S3Prefix',
+#         'S3Uri': 's3://omm-test-bucket/models/abalone/data/input/test/test_X.csv'}},
+#     'ContentType': 'text/csv',
+#     'SplitType': 'Line'},
+#     'TransformOutput': {'S3OutputPath': 's3://omm-test-bucket/models/test/data/transformations/out',
+#     'Accept': 'text/csv',
+#     'AssembleWith': 'Line'},
+#     'TransformResources': {'InstanceType': 'ml.m5.large', 'InstanceCount': 1}
+# }
+# monitoring_job_definition=self.get_job_definition(self.sagemaker_session, self.mb_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
+# model_dashboard_monitoring_schedule=ModelDashboardMonitoringSchedule(
+#     batch_transform_input=transform_step.arguments['TransformInput'],
+#     monitoring_schedule_config=MonitoringScheduleConfig(
+#         schedule_config=schedule_config,
+#         monitoring_job_definition_name="ModelBiasJobDefinition",
+#         monitoring_job_definition=monitoring_job_definition,
+#         monitoring_type="ModelBias" #DataQuality | ModelQuality | ModelBias | ModelExplainability
+#     )
+# )  
 
 class MonitorMaker():
     def __init__(self, model_name, data_dir_uri, baseline_file, train_file, monitor_instance_type, sagemaker_session=None):
@@ -33,18 +67,7 @@ class MonitorMaker():
         self.sagemaker_session=sagemaker_session
     
     def get_monitor_batch_transform_step(self, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None, depends_on=[]):
-        # def get_monitor_batch_transform_step(self, sagemaker_session, role, create_model_step, scope, writes={}, depends_on=[]):
-        # {
-        #     'ModelName': 'sagemaker-xgboost-2026-05-21-17-13-20-923',
-        #     'TransformInput': {'DataSource': {'S3DataSource': {'S3DataType': 'S3Prefix',
-        #         'S3Uri': 's3://omm-test-bucket/models/abalone/data/input/test/test_X.csv'}},
-        #     'ContentType': 'text/csv',
-        #     'SplitType': 'Line'},
-        #     'TransformOutput': {'S3OutputPath': 's3://omm-test-bucket/models/test/data/transformations/out',
-        #     'Accept': 'text/csv',
-        #     'AssembleWith': 'Line'},
-        #     'TransformResources': {'InstanceType': 'ml.m5.large', 'InstanceCount': 1}
-        # }
+
 
         batch_transform_input = BatchTransformInput(
             data_captured_destination_s3_uri=f'{self.data_capture_dir}',
@@ -110,19 +133,6 @@ class MonitorMaker():
 #################### MODEL QUALITY
 
     def get_monitor_batch_transform_step(self, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None, depends_on=[]):
-        # def get_monitor_batch_transform_step(self, sagemaker_session, role, create_model_step, scope, writes={}, depends_on=[]):
-        # {
-        #     'ModelName': 'sagemaker-xgboost-2026-05-21-17-13-20-923',
-        #     'TransformInput': {'DataSource': {'S3DataSource': {'S3DataType': 'S3Prefix',
-        #         'S3Uri': 's3://omm-test-bucket/models/abalone/data/input/test/test_X.csv'}},
-        #     'ContentType': 'text/csv',
-        #     'SplitType': 'Line'},
-        #     'TransformOutput': {'S3OutputPath': 's3://omm-test-bucket/models/test/data/transformations/out',
-        #     'Accept': 'text/csv',
-        #     'AssembleWith': 'Line'},
-        #     'TransformResources': {'InstanceType': 'ml.m5.large', 'InstanceCount': 1}
-        # }
-
 
         batch_transform_input = BatchTransformInput(
             data_captured_destination_s3_uri=f'{self.data_capture_dir}',
@@ -230,18 +240,7 @@ class MonitorMaker():
 
 #################### MODEL BIAS
     def get_batch_model_bias_step(self, transform_step, role, schedule_config, depends_on=[]):
-
-        monitoring_job_definition=self.get_job_definition(self.sagemaker_session, self.mb_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
-
-        # model_dashboard_monitoring_schedule=ModelDashboardMonitoringSchedule(
-        #     batch_transform_input=transform_step.arguments['TransformInput'],
-        #     monitoring_schedule_config=MonitoringScheduleConfig(
-        #         schedule_config=schedule_config,
-        #         monitoring_job_definition_name="ModelBiasJobDefinition",
-        #         monitoring_job_definition=monitoring_job_definition,
-        #         monitoring_type="ModelBias" #DataQuality | ModelQuality | ModelBias | ModelExplainability
-        #     )
-        # )      
+    
         model_bias_check_config=ModelQualityCheckConfig(
             baseline_dataset=f'{self.mb_monitor_dir}/baseline.csv', 
             dataset_format={}, 
