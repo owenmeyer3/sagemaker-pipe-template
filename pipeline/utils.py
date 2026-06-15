@@ -240,34 +240,46 @@ def deploy_or_update_endpoint(boto_session, endpoint_name, endpoint_config_name)
         )
         print(f"Created new endpoint: {endpoint_name}")
 
+def get_model_versions(sm_client, model_package_name, model_package_version):
 
-def create_model_object_from_registry(boto_session, model_package_name, role, model_package_version='latest'):
-    sm_client = boto_session.client('sagemaker')
+    groups = sm_client.list_model_package_groups()
+    for g in groups['ModelPackageGroupSummaryList']:
+        group_name=g['ModelPackageGroupName']
+        versions = sm_client.list_model_packages(ModelPackageGroupName=group_name)
+
+        for v in versions['ModelPackageSummaryList']:
+            if (v['ModelPackageGroupName'] == model_package_name) & (v['ModelPackageVersion'] == model_package_version):
+                return v
+    print('No model_version found in registry')
+    return None
+
+def get_or_create_model_object_from_registry(sm_client, model_package_name, role, model_package_version='latest'):
+
+    model_package_details = sm_client.list_model_packages(
+        ModelPackageGroupName=model_package_name,
+        # ModelApprovalStatus='Approved',
+        SortBy='CreationTime',
+        SortOrder='Descending'
+    )
+    if not model_package_details:
+        print('model package group name does not exist')
+        return
+
     if model_package_version=='latest':
-        model_package_details = sm_client.list_model_packages(
-            ModelPackageGroupName=model_package_name,
-            ModelApprovalStatus='Approved',
-            SortBy='CreationTime',
-            SortOrder='Descending'
-        )
-        if not model_package_details['ModelPackageSummaryList']:
-            raise ValueError("No approved model packages found in registry")
-
         model_package_version = model_package_details['ModelPackageSummaryList'][0]['ModelPackageVersion']
     elif isinstance(model_package_version, str):
         model_package_version=int(model_package_version)
     
-    model_versions_df = view_model_versions(boto_session)
-    model_version_row=model_versions_df[(model_versions_df['ModelPackageGroupName'] == model_package_name) & (model_versions_df['ModelPackageVersion'] == model_package_version)].iloc[0]
-    model_name = model_package_name + '-' + model_version_row['CreationTime'].strftime('%Y-%m-%dT%H-%M-%S')
-    model_package_arn=model_version_row['ModelPackageArn']
-    if model_version_row['ModelApprovalStatus'] != 'Approved':
-        pass
+    model_version = get_model_versions(sm_client, model_package_name, model_package_version)
+    model_package_arn=model_version['ModelPackageArn']
+    if model_version['ModelApprovalStatus'] != 'Approved':
+        print('model version not approved')
+        return None
 
     model_name = model_package_name + "-" + str(model_package_version)
 
     # look for existing model
-    if model_name_exists(boto_session, model_name):
+    if model_name_exists(sm_client, model_name):
         print("using existing model")
         describe_model_response = sm_client.describe_model(ModelName=model_name)
         return [model_name, describe_model_response["ModelArn"]]

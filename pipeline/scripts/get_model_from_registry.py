@@ -24,17 +24,19 @@ def model_name_exists(sm_client, model_name):
     except sm_client.exceptions.ClientError:
         return False
 
-def create_model_object_from_registry(sm_client, model_package_name, role, model_package_version='latest'):
-    if model_package_version=='latest':
-        model_package_details = sm_client.list_model_packages(
-            ModelPackageGroupName=model_package_name,
-            ModelApprovalStatus='Approved',
-            SortBy='CreationTime',
-            SortOrder='Descending'
-        )
-        if not model_package_details['ModelPackageSummaryList']:
-            raise ValueError("No approved model packages found in registry")
+def get_or_create_model_object_from_registry(sm_client, model_package_name, role, model_package_version='latest'):
 
+    model_package_details = sm_client.list_model_packages(
+        ModelPackageGroupName=model_package_name,
+        # ModelApprovalStatus='Approved',
+        SortBy='CreationTime',
+        SortOrder='Descending'
+    )
+    if not model_package_details:
+        logger.error('model package group name does not exist')
+        return
+
+    if model_package_version=='latest':
         model_package_version = model_package_details['ModelPackageSummaryList'][0]['ModelPackageVersion']
     elif isinstance(model_package_version, str):
         model_package_version=int(model_package_version)
@@ -43,6 +45,7 @@ def create_model_object_from_registry(sm_client, model_package_name, role, model
     model_package_arn=model_version['ModelPackageArn']
     if model_version['ModelApprovalStatus'] != 'Approved':
         logger.error('model version not approved')
+        return None
 
     model_name = model_package_name + "-" + str(model_package_version)
 
@@ -69,5 +72,5 @@ def handler(event, context):
     model_package_version = event['model_package_version']
     role = event['role']
 
-    model_name, model_package_arn = create_model_object_from_registry(sm_client, model_package_group_name, role, model_package_version=model_package_version)
+    model_name, model_package_arn = get_or_create_model_object_from_registry(sm_client, model_package_group_name, role, model_package_version=model_package_version)
     return {'model_name': model_name, 'model_package_arn': model_package_arn}

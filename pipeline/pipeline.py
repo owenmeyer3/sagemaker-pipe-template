@@ -97,9 +97,10 @@ class CPipeline(Pipeline):
         self.baseliner.make_baseline_sets(self.target_name, self.prediction_name, target_type=float)
 
         if deployment_type == 'realtime':
-            create_model_step = self.get_realtime_create_step()
+            
+            get_model_step = self.get_model_from_registry_step()
 
-            deploy_endpoint_step=self.get_deploy_endpoint_step(depends_on=[create_model_step])
+            deploy_endpoint_step=self.get_deploy_endpoint_step(depends_on=[get_model_step])
 
             data_quality_step = self.baseliner.get_data_quality_step(
                 self.role_param.default_value, depends_on=[deploy_endpoint_step]
@@ -119,12 +120,13 @@ class CPipeline(Pipeline):
 
             # ssm_step = self.get_ssm_step(self.name, writes={}, depends_on=[])
 
-            return [create_model_step, deploy_endpoint_step, data_quality_step, data_bias_step, model_quality_step, model_bias_step, model_explainability_step]#, ssm_step]
+            return [get_model_step, deploy_endpoint_step, data_quality_step, data_bias_step, model_quality_step, model_bias_step, model_explainability_step]#, ssm_step]
         
         elif deployment_type == 'batch':
-            create_model_step = self.get_batch_create_step()
 
-            batch_transform_step=self.get_batch_transform_step(self.baseline_X_file, depends_on=[create_model_step])
+            get_model_step = self.get_model_from_registry_step()
+
+            batch_transform_step=self.get_batch_transform_step(self.baseline_X_file, depends_on=[get_model_step])
 
             job_definition=self.baseline.get_job_definition(self.sagemaker_session, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
 
@@ -137,39 +139,33 @@ class CPipeline(Pipeline):
             model_quality_step=self.get_batch_model_quality_step(self.sagemaker_session, batch_transform_step, schedule_config, depends_on=[])
 
 
-            return [create_model_step]
+            return [get_model_step]
         else:
             return []
 
 
-    def get_realtime_create_step(self):
+    def get_model_from_registry_step(self):
 
         # make create model step
-        create_model_from_registry = Lambda(
-            function_name='CreateModelFromRegistry',
+        lambda_function = Lambda(
+            function_name='GetModelFromRegistry',
             execution_role_arn=self.role_param.default_value,
-            script='scripts/create_model_from_registry.py',  # path to your file
-            handler='create_model_from_registry.handler',    # filename.function_name
+            script='scripts/get_model_from_registry.py',  # path to your file
+            handler='get_model_from_registry.handler',    # filename.function_name
             timeout=60,
             memory_size=128
         )
         create_model_step = LambdaStep(
-            name='CreateModelStep',
-            lambda_func=create_model_from_registry,
+            name='GetModelStep',
+            lambda_func=lambda_function,
             inputs={
                 'model_package_group_name': self.model_package_group_name_param,
                 'model_package_version': self.model_package_version_param,
                 'role': self.role_param
             },
             outputs=[
-                LambdaOutput(
-                    output_name='model_name',
-                    output_type=LambdaOutputTypeEnum.String
-                ),
-                LambdaOutput(
-                    output_name='model_package_arn',
-                    output_type=LambdaOutputTypeEnum.String
-                )
+                LambdaOutput(output_name='model_name', output_type=LambdaOutputTypeEnum.String),
+                LambdaOutput(output_name='model_package_arn', output_type=LambdaOutputTypeEnum.String)
             ]
         )
         return create_model_step
@@ -224,7 +220,7 @@ class CPipeline(Pipeline):
         
         # make create model step
         create_model_from_registry = Lambda(
-            function_name='CreateModelFromRegistry',
+            function_name='GetModelFromRegistry',
             execution_role_arn=self.role_param.default_value,
             script='scripts/create_model_from_registry.py',  # path to your file
             handler='create_model_from_registry.handler',    # filename.function_name
