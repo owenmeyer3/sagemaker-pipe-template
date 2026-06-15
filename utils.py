@@ -50,19 +50,29 @@ def view_model_versions(boto_session):
     CreationTimes=[]
     ModelPackageStati=[]
     ModelApprovalStati=[]
+    ModelRegistrationType=[]
+
+#     {'ModelPackageGroupName': 'abalone',
+#   'ModelPackageVersion': 3,
+#   'ModelPackageArn': 'arn:aws:sagemaker:us-east-1:088461143167:model-package/abalone/3',
+#   'CreationTime': datetime.datetime(2026, 6, 15, 16, 13, 15, 518000, tzinfo=tzlocal()),
+#   'ModelPackageStatus': 'Completed',
+#   'ModelPackageRegistrationType': 'Registered'}
+    
 
     for g in groups['ModelPackageGroupSummaryList']:
         group_name=g['ModelPackageGroupName']
         versions = sm_client.list_model_packages(ModelPackageGroupName=group_name)
 
         for v in versions['ModelPackageSummaryList']:
-            ModelPackageGroupNames.append(v['ModelPackageGroupName'])
-            ModelPackageVersions.append(v['ModelPackageVersion'])
-            ModelPackageGroupArns.append(v['ModelPackageArn'])
-            ModelPackageDescriptions.append(v['ModelPackageDescription'])
-            CreationTimes.append(v['CreationTime'])
-            ModelPackageStati.append(v['ModelPackageStatus'])
-            ModelApprovalStati.append(v['ModelApprovalStatus'])
+            ModelPackageGroupNames.append(v['ModelPackageGroupName']) if 'ModelPackageGroupName' in v else ModelPackageGroupNames.append('')
+            ModelPackageVersions.append(v['ModelPackageVersion']) if 'ModelPackageVersion' in v else ModelPackageVersions.append('')
+            ModelPackageGroupArns.append(v['ModelPackageArn']) if 'ModelPackageArn' in v else ModelPackageGroupArns.append('')
+            ModelPackageDescriptions.append(v['ModelPackageDescription']) if 'ModelPackageDescription' in v else ModelPackageDescriptions.append('')
+            CreationTimes.append(v['CreationTime']) if 'CreationTime' in v else CreationTimes.append('')
+            ModelPackageStati.append(v['ModelPackageStatus']) if 'ModelPackageStatus' in v else ModelPackageStati.append('')
+            ModelApprovalStati.append(v['ModelApprovalStatus']) if 'ModelApprovalStatus' in v else ModelApprovalStati.append('')
+            ModelRegistrationType.append(v['ModelPackageRegistrationType']) if 'ModelPackageRegistrationType' in v else ModelRegistrationType.append('')
 
     df_dict={
         'ModelPackageGroupName':ModelPackageGroupNames, 
@@ -71,7 +81,8 @@ def view_model_versions(boto_session):
         'ModelPackageDescription':ModelPackageDescriptions, 
         'CreationTime':CreationTimes, 
         'ModelPackageStatus':ModelPackageStati,  
-        'ModelApprovalStatus':ModelApprovalStati
+        'ModelApprovalStatus':ModelApprovalStati,
+        'ModelPackageRegistrationType':ModelRegistrationType
         }
     return pd.DataFrame(df_dict)
 
