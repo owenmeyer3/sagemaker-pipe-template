@@ -21,6 +21,7 @@ class Paths():
         self.baseline_file=  f'{self.baseline_dir}/baseline.csv'
         self.baseline_X_file=f'{self.baseline_dir}/baseline_X.csv'
         self.baseline_model_out_file= f'{self.temp_data_dir}/baseline_X.csv.out'
+        self.baseline_y_file=f'{self.baseline_dir}/baseline_y.csv'
 
 
         # Batch
