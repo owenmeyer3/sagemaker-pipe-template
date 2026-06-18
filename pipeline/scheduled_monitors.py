@@ -64,9 +64,7 @@ def create_scheduled_data_quality_monitor(
                 'StoppingCondition': {
                     'MaxRuntimeInSeconds': max_runtime_in_seconds
                 },
-                'Environment': {
-                    'string': 'string'
-                },
+                'Environment': {'string': 'string'},
                 'NetworkConfig': {
                     # 'EnableInterContainerTrafficEncryption': True|False,
                     # 'EnableNetworkIsolation': True|False,

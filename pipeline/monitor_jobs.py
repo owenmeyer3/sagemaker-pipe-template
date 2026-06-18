@@ -1,7 +1,3 @@
-
-
-vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
-
 ##############################################
 ############### JOB DEFINITIONS ##############
 ##############################################
@@ -158,7 +154,7 @@ def create_model_bias_job_definition(
         },
         ModelBiasAppSpecification={
             'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
-            'ConfigUri': 'string',
+            'ConfigUri': f'{monitor_dir}/check_output',
             # 'Environment': {'string': 'string'}
         },
         ModelBiasJobInput=job_input,
@@ -204,7 +200,6 @@ def create_model_explainability_job_definition(
     name, 
     deploy_type, 
     monitor_dir,
-    ground_truth_dir,
     vpc_config=None,
     endpoint_name=None, 
     data_cature_dir=None, 
@@ -244,7 +239,6 @@ def create_model_explainability_job_definition(
                 # 'ExcludeFeaturesAttribute': 'string'
             }
         }
-    job_input['GroundTruthS3Input']={'S3Uri': ground_truth_dir}
 
     response = sm_client.create_model_explainability_job_definition(
         JobDefinitionName=name,
@@ -254,7 +248,7 @@ def create_model_explainability_job_definition(
         },
         ModelExplainabilityAppSpecification={
             'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
-            'ConfigUri': 'string',
+            'ConfigUri': f'{monitor_dir}/check_output',
             # 'Environment': {'string': 'string'}
         },
         ModelExplainabilityJobInput=job_input,
@@ -299,7 +293,10 @@ def create_model_quality_job_definition(
     role, 
     name, 
     deploy_type, 
+    problem_type,
+    ground_truth_label,
     monitor_dir, 
+    ground_truth_dir,
     vpc_config=None,
     endpoint_name=None, 
     data_cature_dir=None, 
@@ -310,11 +307,11 @@ def create_model_quality_job_definition(
         job_input={
             'EndpointInput': {
                 'EndpointName': endpoint_name,
-                'LocalPath': '/opt/ml/processing/input/endpoint'#,
+                'LocalPath': '/opt/ml/processing/input/endpoint',
                 # 'S3InputMode': 'Pipe'|'File',
                 # 'S3DataDistributionType': 'FullyReplicated'|'ShardedByS3Key',
                 # 'FeaturesAttribute': 'string',
-                # 'InferenceAttribute': 'string',
+                'InferenceAttribute': ground_truth_label,
                 # 'ProbabilityAttribute': 'string',
                 # 'ProbabilityThresholdAttribute': 123.0,
                 # 'StartTimeOffset': 'string',
@@ -339,6 +336,7 @@ def create_model_quality_job_definition(
                 # 'ExcludeFeaturesAttribute': 'string'
             }
         }
+    job_input['GroundTruthS3Input']={'S3Uri': ground_truth_dir}
 
     response = sm_client.create_model_quality_job_definition(
         JobDefinitionName=name,
@@ -348,6 +346,7 @@ def create_model_quality_job_definition(
         },
         ModelQualityAppSpecification={
             'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+            'ProblemType': problem_type,
             # 'ContainerEntrypoint': ['string',],
             # 'ContainerArguments': ['string',],
             # 'RecordPreprocessorSourceUri': 'string',
@@ -402,7 +401,9 @@ def create_data_quality_monitoring_schedule(
     schedule_expression, 
     data_analysis_start_time, 
     data_analysis_end_time,
-    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']},
+    endpoint_name=None, 
+    data_cature_dir=None
 ):
 
     job_definition_name = f'{name}-job'
@@ -414,8 +415,8 @@ def create_data_quality_monitoring_schedule(
         deploy_type, 
         monitor_dir, 
         vpc_config=vpc_config,
-        endpoint_name=None, 
-        data_cature_dir=None, 
+        endpoint_name=endpoint_name, 
+        data_cature_dir=data_cature_dir, 
         instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
         dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
     )
@@ -446,7 +447,9 @@ def create_model_bias_monitoring_schedule(
     schedule_expression, 
     data_analysis_start_time, 
     data_analysis_end_time,
-    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']},
+    endpoint_name=None, 
+    data_cature_dir=None
 ):
 
     job_definition_name = f'{name}-job'
@@ -454,13 +457,13 @@ def create_model_bias_monitoring_schedule(
     response = create_model_bias_job_definition(        
         sm_client, 
         role, 
-        name, 
+        job_definition_name, 
         deploy_type, 
         monitor_dir, 
         ground_truth_dir,
         vpc_config=vpc_config,
-        endpoint_name=None, 
-        data_cature_dir=None, 
+        endpoint_name=endpoint_name, 
+        data_cature_dir=data_cature_dir, 
         instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
         dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
     )
@@ -487,11 +490,12 @@ def create_model_explainability_monitoring_schedule(
     role,
     deploy_type,
     monitor_dir,
-    ground_truth_dir,
     schedule_expression, 
     data_analysis_start_time, 
     data_analysis_end_time,
-    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']},
+    endpoint_name=None, 
+    data_cature_dir=None
 ):
 
     job_definition_name = f'{name}-job'
@@ -499,13 +503,12 @@ def create_model_explainability_monitoring_schedule(
     response = create_model_explainability_job_definition(        
         sm_client, 
         role, 
-        name, 
+        job_definition_name, 
         deploy_type, 
         monitor_dir, 
-        ground_truth_dir,
         vpc_config=vpc_config,
-        endpoint_name=None, 
-        data_cature_dir=None, 
+        endpoint_name=endpoint_name, 
+        data_cature_dir=data_cature_dir, 
         instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
         dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
     )
@@ -530,11 +533,16 @@ def create_model_quality_monitoring_schedule(
     name,
     role,
     deploy_type,
+    problem_type, # 'BinaryClassification'|'MulticlassClassification'|'Regression'
+    ground_truth_label,
     monitor_dir,
+    ground_truth_dir,
     schedule_expression, 
     data_analysis_start_time, 
     data_analysis_end_time,
-    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']},
+    endpoint_name=None, 
+    data_cature_dir=None
 ):
 
     job_definition_name = f'{name}-job'
@@ -542,12 +550,15 @@ def create_model_quality_monitoring_schedule(
     response = create_model_quality_job_definition(        
         sm_client, 
         role, 
-        name, 
+        job_definition_name, 
         deploy_type, 
+        problem_type,
+        ground_truth_label,
         monitor_dir, 
+        ground_truth_dir,
         vpc_config=vpc_config,
-        endpoint_name=None, 
-        data_cature_dir=None, 
+        endpoint_name=endpoint_name, 
+        data_cature_dir=data_cature_dir, 
         instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
         dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
     )
