@@ -1,76 +1,355 @@
-import pandas as pd
-from sagemaker.core.model_monitor.model_monitoring import DefaultModelMonitor, ModelQualityMonitor
-from sagemaker.core.model_monitor.clarify_model_monitoring import ModelBiasMonitor, ModelExplainabilityMonitor
-from sagemaker.core.helper.session_helper import get_execution_role
-from sagemaker.core.model_monitor.dataset_format import DatasetFormat
-from sagemaker.core.network import NetworkConfig
-from sagemaker.core.clarify import DataConfig, BiasConfig, ModelConfig, ModelPredictedLabelConfig, SHAPConfig
-from sagemaker.core.shapes.shapes import ModelDashboardMonitoringSchedule, MonitoringScheduleConfig, BatchTransformInput, EndpointInput, MonitoringDatasetFormat, MonitoringCsvDatasetFormat, MonitoringResources, MonitoringClusterConfig, MonitoringAppSpecification, MonitoringJobDefinition, MonitoringInput, MonitoringOutputConfig, MonitoringS3Output, MonitoringOutput, MonitoringStoppingCondition, ScheduleConfig
-from sagemaker.core.image_uris import retrieve as retrieve_image
-from sagemaker.mlops.workflow.steps import ProcessingStep
-from sagemaker.mlops.workflow.quality_check_step import ModelQualityCheckConfig, DataQualityCheckConfig
-from sagemaker.mlops.workflow.monitor_batch_transform_step import MonitorBatchTransformStep
-from sagemaker.mlops.workflow.quality_check_step import QualityCheckStep, DataQualityCheckConfig
-from sagemaker.mlops.workflow.check_job_config import CheckJobConfig
+from monitor_inputs import get_monitoring_job_input
 
-def get_monitor_schedule_config(deploy_type, role, monitor_type, schedule_expression, data_cature_dir, monitor_dir, constraints_path, statistics_path, endpoint_name=None, instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800):
 
-    if deploy_type == 'realtime':
-        monitoring_inputs=[{
-            "EndpointInput": {
-                "EndpointName": "abalone-endpoint",
-                "LocalPath": "/opt/ml/processing/input/endpoint"
-            }
-        }]
-    else:
-        monitoring_inputs=[{
-            "BatchTransformInput": {
-                "DataCapturedDestinationS3Uri": f"{data_cature_dir}/",
-                "LocalPath": "/opt/ml/processing/input",
-                "DatasetFormat": {
-                    "Csv": {"Header": False}
-                }
-            }
-        }]
+def create_scheduled_data_quality_monitor(
+        sm_client, 
+        role, 
+        name, 
+        deploy_type, 
+        schedule_expression, 
+        monitor_dir, 
+        endpoint_name=None, 
+        data_analysis_start_time="-PT1H", data_analysis_end_time="-PT0H", 
+        data_cature_dir=None, 
+        instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800, 
+        vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'], 'Subnets': ['sg-63ef435d']}, 
+        dataset_format={'Csv': {'Header': True|False}}
+    ):
 
-    return {
-        "ScheduleConfig": {
-            "ScheduleExpression": schedule_expression# "cron(0 * ? * * *)"
-        },
-        "MonitoringJobDefinition": {
-            "BaselineConfig": {
-                "ConstraintsResource": {"S3Uri": constraints_path},
-                "StatisticsResource": {"S3Uri": statistics_path}
+    job_input=get_monitoring_job_input(deploy_type, endpoint_name=endpoint_name, data_cature_dir=data_cature_dir, dataset_format=dataset_format)
+
+    return sm_client.create_monitoring_schedule(
+        MonitoringScheduleName=name,
+        MonitoringScheduleConfig={
+            'ScheduleConfig': {
+                'ScheduleExpression': schedule_expression,
+                'DataAnalysisStartTime': data_analysis_start_time,
+                'DataAnalysisEndTime': data_analysis_end_time
             },
-            "MonitoringInputs": monitoring_inputs,
-            "MonitoringOutputConfig": {
-                "MonitoringOutputs": [{
-                    "S3Output": {
-                        "S3Uri": f'{monitor_dir}/reports',
-                        "LocalPath": "/opt/ml/processing/output"
+            'MonitoringJobDefinition': {
+                'BaselineConfig': {
+                    #'BaseliningJobName': 'string',
+                    "ConstraintsResource": {"S3Uri": f'{monitor_dir}/constraints.json'},
+                    "StatisticsResource": {"S3Uri": f'{monitor_dir}/statistics.json'}
+                },
+                'MonitoringInputs': [job_input],
+                'MonitoringOutputConfig': {
+                    'MonitoringOutputs': [
+                        {
+                            'S3Output': {
+                                'S3Uri': f'{monitor_dir}/reports',
+                                'LocalPath': '/opt/ml/processing/output'#,
+                                # 'S3UploadMode': 'Continuous'|'EndOfJob'
+                            }
+                        },
+                    ],
+                    # 'KmsKeyId': 'string'
+                },
+                'MonitoringResources': {
+                    'ClusterConfig': {
+                        'InstanceCount': 1,
+                        'InstanceType': instance_type,
+                        'VolumeSizeInGB': volume_size_in_gb#,
+                        # 'VolumeKmsKeyId': 'string'
                     }
-                }]
+                },
+                'MonitoringAppSpecification': {
+                    'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer"#,
+                    # 'ContainerEntrypoint': ['string',],
+                    # 'ContainerArguments': ['string',],
+                    # 'RecordPreprocessorSourceUri': 'string',
+                    # 'PostAnalyticsProcessorSourceUri': 'string',
+                    # 'Environment': {'string': 'string'}
+                },
+                'StoppingCondition': {
+                    'MaxRuntimeInSeconds': max_runtime_in_seconds
+                },
+                'Environment': {
+                    'string': 'string'
+                },
+                'NetworkConfig': {
+                    # 'EnableInterContainerTrafficEncryption': True|False,
+                    # 'EnableNetworkIsolation': True|False,
+                    'VpcConfig': vpc_config
+                },
+                'RoleArn': role
             },
-            "MonitoringResources": {
-                "ClusterConfig": {
-                    "InstanceCount": 1,
-                    "InstanceType": instance_type,
-                    "VolumeSizeInGB": volume_size_in_gb
-                }
-            },
-            "MonitoringAppSpecification": {
-                "ImageUri": "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer"
-            },
-            "RoleArn": role,
-            "StoppingCondition": {"MaxRuntimeInSeconds": max_runtime_in_seconds}
+            # 'MonitoringJobDefinitionName': f'{name}-job', -- dont include since were making it here
+            'MonitoringType': 'DataQuality' # |'ModelQuality'|'ModelBias'|'ModelExplainability'
         },
-        "MonitoringType": monitor_type #"DataQuality"
-    }
+        # Tags=[{'Key': 'string', 'Value': 'string'},]
+    )
 
-def create_scheduled_data_quality_monitor(boto_session, role, name, deploy_type, schedule_expression, constraints_path, statistics_path, monitor_dir, endpoint_name=None, data_cature_dir=None, instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800):
 
-    sm_client = boto_session.client('sagemaker', region_name='us-east-1')
 
+
+# def create_scheduled_data_quality_monitor(sm_client, role, name, deploy_type, schedule_expression, constraints_file, statistics_file, monitor_dir, endpoint_name=None, data_cature_dir=None, instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800):
+
+#     if deploy_type == 'realtime':
+#         job_input={
+#             'EndpointInput': {
+#                 'EndpointName': endpoint_name,
+#                 'LocalPath': '/opt/ml/processing/input/endpoint',
+#                 # 'S3InputMode': 'Pipe'|'File',
+#                 # 'S3DataDistributionType': 'FullyReplicated'|'ShardedByS3Key',
+#                 # 'FeaturesAttribute': 'string',
+#                 # 'InferenceAttribute': 'string',
+#                 # 'ProbabilityAttribute': 'string',
+#                 # 'ProbabilityThresholdAttribute': 123.0,
+#                 # 'StartTimeOffset': 'string',
+#                 # 'EndTimeOffset': 'string',
+#                 # 'ExcludeFeaturesAttribute': 'string'
+#             }
+#         }
+#     else:
+#         job_input={
+#             'BatchTransformInput': {
+#                 'DataCapturedDestinationS3Uri': f'{data_cature_dir}/',
+#                 'DatasetFormat': {
+#                     'Csv': {'Header': True|False},
+#                     # 'Json': {'Line': True|False},
+#                     # 'Parquet': {}
+#                 },
+#                 'LocalPath': '/opt/ml/processing/input',
+#                 # 'S3InputMode': 'Pipe'|'File',
+#                 # 'S3DataDistributionType': 'FullyReplicated'|'ShardedByS3Key',
+#                 # 'FeaturesAttribute': 'string',
+#                 # 'InferenceAttribute': 'string',
+#                 # 'ProbabilityAttribute': 'string',
+#                 # 'ProbabilityThresholdAttribute': 123.0,
+#                 # 'StartTimeOffset': 'string',
+#                 # 'EndTimeOffset': 'string',
+#                 # 'ExcludeFeaturesAttribute': 'string'
+#             }
+#         }
+
+#     response = sm_client.create_data_quality_job_definition(
+#         JobDefinitionName=f'{name}-job',
+#         DataQualityBaselineConfig={
+#             #'BaseliningJobName': 'string',
+#             "ConstraintsResource": {"S3Uri": constraints_file},
+#             "StatisticsResource": {"S3Uri": statistics_file}
+#         },
+#         DataQualityAppSpecification={
+#             'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+#             # 'ContainerEntrypoint': ['string',],
+#             # 'ContainerArguments': ['string',],
+#             # 'RecordPreprocessorSourceUri': 'string',
+#             # 'PostAnalyticsProcessorSourceUri': 'string',
+#             # 'Environment': {'string': 'string'}
+#         },
+#         DataQualityJobInput=job_input,
+#         DataQualityJobOutputConfig={
+#             'MonitoringOutputs': [
+#                 {
+#                     'S3Output': {
+#                         'S3Uri': f'{monitor_dir}/reports',
+#                         'LocalPath': '/opt/ml/processing/output',
+#                         # 'S3UploadMode': 'Continuous'|'EndOfJob'
+#                     }
+#                 },
+#             ],
+#             # 'KmsKeyId': 'string'
+#         },
+#         JobResources={
+#             'ClusterConfig': {
+#                 'InstanceCount': 1,
+#                 'InstanceType': instance_type,
+#                 'VolumeSizeInGB': volume_size_in_gb,
+#                 # 'VolumeKmsKeyId': 'string'
+#             }
+#         },
+#         NetworkConfig={
+#             # 'EnableInterContainerTrafficEncryption': True|False,
+#             # 'EnableNetworkIsolation': True|False,
+#             'VpcConfig': {
+#                 'SecurityGroupIds': ['string',],
+#                 'Subnets': ['string',]
+#             }
+#         },
+#         RoleArn=role,
+#         StoppingCondition={
+#             'MaxRuntimeInSeconds': max_runtime_in_seconds
+#         },
+#         # Tags=[{'Key': 'string', 'Value': 'string'},]
+#     )
+
+
+#     response = sm_client.create_monitoring_schedule(
+#         MonitoringScheduleName=name,
+#         MonitoringScheduleConfig={
+#             'ScheduleConfig': {
+#                 'ScheduleExpression': schedule_expression,
+#                 'DataAnalysisStartTime': "-PT1H",
+#                 'DataAnalysisEndTime': "-PT0H"
+#             },
+#             'MonitoringJobDefinition': {
+#                 'BaselineConfig': {
+#                     'BaseliningJobName': 'string',
+#                     'ConstraintsResource': {
+#                         'S3Uri': 'string'
+#                     },
+#                     'StatisticsResource': {
+#                         'S3Uri': 'string'
+#                     }
+#                 },
+#                 'MonitoringInputs': [
+#                     {
+#                         'EndpointInput': {
+#                             'EndpointName': 'string',
+#                             'LocalPath': 'string',
+#                             'S3InputMode': 'Pipe'|'File',
+#                             'S3DataDistributionType': 'FullyReplicated'|'ShardedByS3Key',
+#                             'FeaturesAttribute': 'string',
+#                             'InferenceAttribute': 'string',
+#                             'ProbabilityAttribute': 'string',
+#                             'ProbabilityThresholdAttribute': 123.0,
+#                             'StartTimeOffset': 'string',
+#                             'EndTimeOffset': 'string',
+#                             'ExcludeFeaturesAttribute': 'string'
+#                         },
+#                         'BatchTransformInput': {
+#                             'DataCapturedDestinationS3Uri': 'string',
+#                             'DatasetFormat': {
+#                                 'Csv': {
+#                                     'Header': True|False
+#                                 },
+#                                 'Json': {
+#                                     'Line': True|False
+#                                 },
+#                                 'Parquet': {}
+
+#                             },
+#                             'LocalPath': 'string',
+#                             'S3InputMode': 'Pipe'|'File',
+#                             'S3DataDistributionType': 'FullyReplicated'|'ShardedByS3Key',
+#                             'FeaturesAttribute': 'string',
+#                             'InferenceAttribute': 'string',
+#                             'ProbabilityAttribute': 'string',
+#                             'ProbabilityThresholdAttribute': 123.0,
+#                             'StartTimeOffset': 'string',
+#                             'EndTimeOffset': 'string',
+#                             'ExcludeFeaturesAttribute': 'string'
+#                         }
+#                     },
+#                 ],
+#                 'MonitoringOutputConfig': {
+#                     'MonitoringOutputs': [
+#                         {
+#                             'S3Output': {
+#                                 'S3Uri': 'string',
+#                                 'LocalPath': 'string',
+#                                 'S3UploadMode': 'Continuous'|'EndOfJob'
+#                             }
+#                         },
+#                     ],
+#                     'KmsKeyId': 'string'
+#                 },
+#                 'MonitoringResources': {
+#                     'ClusterConfig': {
+#                         'InstanceCount': 123,
+#                         'InstanceType': 'ml.t3.medium'|'ml.t3.large'|'ml.t3.xlarge'|'ml.t3.2xlarge'|'ml.m4.xlarge'|'ml.m4.2xlarge'|'ml.m4.4xlarge'|'ml.m4.10xlarge'|'ml.m4.16xlarge'|'ml.c4.xlarge'|'ml.c4.2xlarge'|'ml.c4.4xlarge'|'ml.c4.8xlarge'|'ml.p2.xlarge'|'ml.p2.8xlarge'|'ml.p2.16xlarge'|'ml.p3.2xlarge'|'ml.p3.8xlarge'|'ml.p3.16xlarge'|'ml.c5.xlarge'|'ml.c5.2xlarge'|'ml.c5.4xlarge'|'ml.c5.9xlarge'|'ml.c5.18xlarge'|'ml.m5.large'|'ml.m5.xlarge'|'ml.m5.2xlarge'|'ml.m5.4xlarge'|'ml.m5.12xlarge'|'ml.m5.24xlarge'|'ml.r5.large'|'ml.r5.xlarge'|'ml.r5.2xlarge'|'ml.r5.4xlarge'|'ml.r5.8xlarge'|'ml.r5.12xlarge'|'ml.r5.16xlarge'|'ml.r5.24xlarge'|'ml.g4dn.xlarge'|'ml.g4dn.2xlarge'|'ml.g4dn.4xlarge'|'ml.g4dn.8xlarge'|'ml.g4dn.12xlarge'|'ml.g4dn.16xlarge'|'ml.g5.xlarge'|'ml.g5.2xlarge'|'ml.g5.4xlarge'|'ml.g5.8xlarge'|'ml.g5.16xlarge'|'ml.g5.12xlarge'|'ml.g5.24xlarge'|'ml.g5.48xlarge'|'ml.r5d.large'|'ml.r5d.xlarge'|'ml.r5d.2xlarge'|'ml.r5d.4xlarge'|'ml.r5d.8xlarge'|'ml.r5d.12xlarge'|'ml.r5d.16xlarge'|'ml.r5d.24xlarge'|'ml.g6.xlarge'|'ml.g6.2xlarge'|'ml.g6.4xlarge'|'ml.g6.8xlarge'|'ml.g6.12xlarge'|'ml.g6.16xlarge'|'ml.g6.24xlarge'|'ml.g6.48xlarge'|'ml.g6e.xlarge'|'ml.g6e.2xlarge'|'ml.g6e.4xlarge'|'ml.g6e.8xlarge'|'ml.g6e.12xlarge'|'ml.g6e.16xlarge'|'ml.g6e.24xlarge'|'ml.g6e.48xlarge'|'ml.m6i.large'|'ml.m6i.xlarge'|'ml.m6i.2xlarge'|'ml.m6i.4xlarge'|'ml.m6i.8xlarge'|'ml.m6i.12xlarge'|'ml.m6i.16xlarge'|'ml.m6i.24xlarge'|'ml.m6i.32xlarge'|'ml.c6i.xlarge'|'ml.c6i.2xlarge'|'ml.c6i.4xlarge'|'ml.c6i.8xlarge'|'ml.c6i.12xlarge'|'ml.c6i.16xlarge'|'ml.c6i.24xlarge'|'ml.c6i.32xlarge'|'ml.m7i.large'|'ml.m7i.xlarge'|'ml.m7i.2xlarge'|'ml.m7i.4xlarge'|'ml.m7i.8xlarge'|'ml.m7i.12xlarge'|'ml.m7i.16xlarge'|'ml.m7i.24xlarge'|'ml.m7i.48xlarge'|'ml.c7i.large'|'ml.c7i.xlarge'|'ml.c7i.2xlarge'|'ml.c7i.4xlarge'|'ml.c7i.8xlarge'|'ml.c7i.12xlarge'|'ml.c7i.16xlarge'|'ml.c7i.24xlarge'|'ml.c7i.48xlarge'|'ml.r7i.large'|'ml.r7i.xlarge'|'ml.r7i.2xlarge'|'ml.r7i.4xlarge'|'ml.r7i.8xlarge'|'ml.r7i.12xlarge'|'ml.r7i.16xlarge'|'ml.r7i.24xlarge'|'ml.r7i.48xlarge'|'ml.p5.4xlarge'|'ml.g7e.2xlarge'|'ml.g7e.4xlarge'|'ml.g7e.8xlarge'|'ml.g7e.12xlarge'|'ml.g7e.24xlarge'|'ml.g7e.48xlarge',
+#                         'VolumeSizeInGB': 123,
+#                         'VolumeKmsKeyId': 'string'
+#                     }
+#                 },
+#                 'MonitoringAppSpecification': {
+#                     'ImageUri': 'string',
+#                     'ContainerEntrypoint': [
+#                         'string',
+#                     ],
+#                     'ContainerArguments': [
+#                         'string',
+#                     ],
+#                     'RecordPreprocessorSourceUri': 'string',
+#                     'PostAnalyticsProcessorSourceUri': 'string'
+#                 },
+#                 'StoppingCondition': {
+#                     'MaxRuntimeInSeconds': 123
+#                 },
+#                 'Environment': {
+#                     'string': 'string'
+#                 },
+#                 'NetworkConfig': {
+#                     'EnableInterContainerTrafficEncryption': True|False,
+#                     'EnableNetworkIsolation': True|False,
+#                     'VpcConfig': {
+#                         'SecurityGroupIds': [
+#                             'string',
+#                         ],
+#                         'Subnets': [
+#                             'string',
+#                         ]
+#                     }
+#                 },
+#                 'RoleArn': 'string'
+#             },
+#             'MonitoringJobDefinitionName': 'string',
+#             'MonitoringType': 'DataQuality'|'ModelQuality'|'ModelBias'|'ModelExplainability'
+#         },
+#         # Tags=[{'Key': 'string', 'Value': 'string'},]
+#     )
+
+
+
+#     if deploy_type == 'realtime':
+#         monitoring_inputs=[{
+#             "EndpointInput": {
+#                 "EndpointName": endpoint_name,
+#                 "LocalPath": "/opt/ml/processing/input/endpoint"
+#             }
+#         }]
+#     else:
+#         monitoring_inputs=[{
+#             "BatchTransformInput": {
+#                 "DataCapturedDestinationS3Uri": f"{data_cature_dir}/",
+#                 "LocalPath": "/opt/ml/processing/input",
+#                 "DatasetFormat": {
+#                     "Csv": {"Header": False}
+#                 }
+#             }
+#         }]
+
+#     sm_client.create_monitoring_schedule(
+#         MonitoringScheduleName=name,
+#             MonitoringScheduleConfig={
+#             "ScheduleConfig": {
+#                 "ScheduleExpression": schedule_expression# "cron(0 * ? * * *)"
+#             },
+#             "MonitoringJobDefinition": {
+#                 "BaselineConfig": {
+#                     "ConstraintsResource": {"S3Uri": constraints_file},
+#                     "StatisticsResource": {"S3Uri": statistics_file}
+#                 },
+#                 "MonitoringInputs": monitoring_inputs,
+#                 "MonitoringOutputConfig": {
+#                     "MonitoringOutputs": [{
+#                         "S3Output": {
+#                             "S3Uri": f'{monitor_dir}/reports',
+#                             "LocalPath": "/opt/ml/processing/output"
+#                         }
+#                     }]
+#                 },
+#                 "MonitoringResources": {
+#                     "ClusterConfig": {
+#                         "InstanceCount": 1,
+#                         "InstanceType": instance_type,
+#                         "VolumeSizeInGB": volume_size_in_gb
+#                     }
+#                 },
+#                 "MonitoringAppSpecification": {
+#                     "ImageUri": "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer"
+#                 },
+#                 "RoleArn": role,
+#                 "StoppingCondition": {"MaxRuntimeInSeconds": max_runtime_in_seconds}
+#             },
+#             "MonitoringType": "DataQuality"
+#         }
+#     )
+
+
+def create_scheduled_model_quality_monitor(sm_client, role, name, deploy_type, schedule_expression, constraints_file, ground_truth_input, monitor_dir, endpoint_name=None, data_cature_dir=None, instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800):
+    
     if deploy_type == 'realtime':
         monitoring_inputs=[{
             "EndpointInput": {
@@ -85,20 +364,22 @@ def create_scheduled_data_quality_monitor(boto_session, role, name, deploy_type,
                 "LocalPath": "/opt/ml/processing/input",
                 "DatasetFormat": {
                     "Csv": {"Header": False}
-                }
+                },
+                "InferenceAttribute": "0",
+                "StartTimeOffset": "-PT1H",
+                "EndTimeOffset": "-PT0H"
             }
         }]
-
+    
     sm_client.create_monitoring_schedule(
         MonitoringScheduleName=name,
-            MonitoringScheduleConfig={
+        MonitoringScheduleConfig={
             "ScheduleConfig": {
-                "ScheduleExpression": schedule_expression# "cron(0 * ? * * *)"
+                "ScheduleExpression": schedule_expression
             },
             "MonitoringJobDefinition": {
                 "BaselineConfig": {
-                    "ConstraintsResource": {"S3Uri": constraints_path},
-                    "StatisticsResource": {"S3Uri": statistics_path}
+                    "ConstraintsResource": {"S3Uri": constraints_file},
                 },
                 "MonitoringInputs": monitoring_inputs,
                 "MonitoringOutputConfig": {
@@ -117,385 +398,185 @@ def create_scheduled_data_quality_monitor(boto_session, role, name, deploy_type,
                     }
                 },
                 "MonitoringAppSpecification": {
-                    "ImageUri": "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer"
+                    "ImageUri": "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+                    "ProblemType": "Regression"
+                },
+                "RoleArn": role,
+                "StoppingCondition": {"MaxRuntimeInSeconds": max_runtime_in_seconds},
+                "Environment": {
+                    "ground_truth_input": ground_truth_input
+                }
+            },
+            "MonitoringType": "ModelQuality"
+        }
+    )
+
+    
+def create_scheduled_data_bias_monitor(sm_client, role, name, deploy_type, schedule_expression, constraints_file, analysis_config_file, monitor_dir, endpoint_name=None, data_cature_dir=None, instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800):
+    
+    if deploy_type == 'realtime':
+        monitoring_inputs=[{
+            "EndpointInput": {
+                "EndpointName": endpoint_name,
+                "LocalPath": "/opt/ml/processing/input/endpoint"
+            }
+        }]
+    else:
+        monitoring_inputs=[{
+            "BatchTransformInput": {
+                "DataCapturedDestinationS3Uri": f"{data_cature_dir}/",
+                "LocalPath": "/opt/ml/processing/input",
+                "DatasetFormat": {"Csv": {"Header": False}}
+            }
+        }]
+    
+    sm_client.create_monitoring_schedule(
+        MonitoringScheduleName=name,
+        MonitoringScheduleConfig={
+            "ScheduleConfig": {
+                "ScheduleExpression": schedule_expression
+            },
+            "MonitoringJobDefinition": {
+                "BaselineConfig": {
+                    "ConstraintsResource": {"S3Uri": constraints_file}
+                },
+                "MonitoringInputs": monitoring_inputs,
+                "MonitoringOutputConfig": {
+                    "MonitoringOutputs": [{
+                        "S3Output": {
+                            "S3Uri": f'{monitor_dir}/reports',
+                            "LocalPath": "/opt/ml/processing/output"
+                        }
+                    }]
+                },
+                "MonitoringResources": {
+                    "ClusterConfig": {
+                        "InstanceCount": 1,
+                        "InstanceType": instance_type,
+                        "VolumeSizeInGB": volume_size_in_gb
+                    }
+                },
+                "MonitoringAppSpecification": {
+                    "ImageUri": "205585389593.dkr.ecr.us-east-1.amazonaws.com/sagemaker-clarify-processing:1.0",
+                    "ConfigUri": analysis_config_file
                 },
                 "RoleArn": role,
                 "StoppingCondition": {"MaxRuntimeInSeconds": max_runtime_in_seconds}
             },
-            "MonitoringType": "DataQuality"
+            "MonitoringType": "DataBias"
         }
     )
 
-def create_scheduled_model_quality_monitor(boto_session, role, monitor_type, name, deploy_type, schedule_expression, constraints_path, statistics_path, monitor_dir, endpoint_name=None, data_cature_dir=None, instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800):
 
-    sm_client = boto_session.client('sagemaker', region_name='us-east-1')
+def create_scheduled_model_bias_monitor(sm_client, role, name, deploy_type, schedule_expression, constraints_file, analysis_config_file, monitor_dir, endpoint_name=None, data_cature_dir=None, instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800):
+
+    if deploy_type == 'realtime':
+        monitoring_inputs=[{
+            "EndpointInput": {
+                "EndpointName": endpoint_name,
+                "LocalPath": "/opt/ml/processing/input/endpoint"
+            }
+        }]
+    else:
+        monitoring_inputs=[{
+            "BatchTransformInput": {
+                "DataCapturedDestinationS3Uri": f"{data_cature_dir}/",
+                "LocalPath": "/opt/ml/processing/input",
+                "DatasetFormat": {"Csv": {"Header": False}},
+                "InferenceAttribute": "0"
+            }
+        }]
 
     sm_client.create_monitoring_schedule(
         MonitoringScheduleName=name,
-        MonitoringScheduleConfig=get_monitor_schedule_config(
-            deploy_type, 
-            role, 
-            monitor_type, 
-            schedule_expression, 
-            data_cature_dir, monitor_dir, 
-            constraints_path, 
-            statistics_path,
-            endpoint_name=endpoint_name,
-            instance_type=instance_type, 
-            volume_size_in_gb=volume_size_in_gb, 
-            max_runtime_in_seconds=max_runtime_in_seconds
-        )
+        MonitoringScheduleConfig={
+            "ScheduleConfig": {
+                "ScheduleExpression": schedule_expression
+            },
+            "MonitoringJobDefinition": {
+                "BaselineConfig": {
+                    "ConstraintsResource": {"S3Uri": constraints_file}
+                },
+                "MonitoringInputs": monitoring_inputs,
+                "MonitoringOutputConfig": {
+                    "MonitoringOutputs": [{
+                        "S3Output": {
+                            "S3Uri": f'{monitor_dir}/reports',
+                            "LocalPath": "/opt/ml/processing/output"
+                        }
+                    }]
+                },
+                "MonitoringResources": {
+                    "ClusterConfig": {
+                        "InstanceCount": 1,
+                        "InstanceType": instance_type,
+                        "VolumeSizeInGB": volume_size_in_gb
+                    }
+                },
+                "MonitoringAppSpecification": {
+                    "ImageUri": "205585389593.dkr.ecr.us-east-1.amazonaws.com/sagemaker-clarify-processing:1.0",
+                    "ConfigUri": analysis_config_file
+                },
+                "RoleArn": role,
+                "StoppingCondition": {"MaxRuntimeInSeconds": max_runtime_in_seconds}
+            },
+            "MonitoringType": "ModelBias"
+        }
     )
 
-# def get_monitor_batch_transform_step(self, sagemaker_session, role, create_model_step, scope, writes={}, depends_on=[]):
-# {
-#     'ModelName': 'sagemaker-xgboost-2026-05-21-17-13-20-923',
-#     'TransformInput': {'DataSource': {'S3DataSource': {'S3DataType': 'S3Prefix',
-#         'S3Uri': 's3://omm-test-bucket/models/abalone/data/input/test/test_X.csv'}},
-#     'ContentType': 'text/csv',
-#     'SplitType': 'Line'},
-#     'TransformOutput': {'S3OutputPath': 's3://omm-test-bucket/models/test/data/transformations/out',
-#     'Accept': 'text/csv',
-#     'AssembleWith': 'Line'},
-#     'TransformResources': {'InstanceType': 'ml.m5.large', 'InstanceCount': 1}
-# }
-# def get_monitor_batch_transform_step(self, sagemaker_session, role, create_model_step, scope, writes={}, depends_on=[]):
-# {
-#     'ModelName': 'sagemaker-xgboost-2026-05-21-17-13-20-923',
-#     'TransformInput': {'DataSource': {'S3DataSource': {'S3DataType': 'S3Prefix',
-#         'S3Uri': 's3://omm-test-bucket/models/abalone/data/input/test/test_X.csv'}},
-#     'ContentType': 'text/csv',
-#     'SplitType': 'Line'},
-#     'TransformOutput': {'S3OutputPath': 's3://omm-test-bucket/models/test/data/transformations/out',
-#     'Accept': 'text/csv',
-#     'AssembleWith': 'Line'},
-#     'TransformResources': {'InstanceType': 'ml.m5.large', 'InstanceCount': 1}
-# }
-# monitoring_job_definition=self.get_job_definition(self.sagemaker_session, self.mb_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
-# model_dashboard_monitoring_schedule=ModelDashboardMonitoringSchedule(
-#     batch_transform_input=transform_step.arguments['TransformInput'],
-#     monitoring_schedule_config=MonitoringScheduleConfig(
-#         schedule_config=schedule_config,
-#         monitoring_job_definition_name="ModelBiasJobDefinition",
-#         monitoring_job_definition=monitoring_job_definition,
-#         monitoring_type="ModelBias" #DataQuality | ModelQuality | ModelBias | ModelExplainability
-#     )
-# )  
 
-class MonitorMaker():
-    def __init__(self, model_name, data_dir_uri, baseline_file, train_file, monitor_instance_type, sagemaker_session=None):
-        self.model_name=model_name
-        self.baseline_file= baseline_file # f'{data_dir_uri}/baseline/baseline.csv'
-        self.train_file=    train_file   # f'{data_dir_uri}/input/train/train.csv'
-        self.train_X_file=  f'{data_dir_uri}/monitors/model-explainability/train_X.csv'
-        self.baseline_pred_file=f'{data_dir_uri}/baseline/baseline_pred.csv'
-        self.dq_monitor_dir=f'{data_dir_uri}/monitors/data-quality'
-        self.mq_monitor_dir=f'{data_dir_uri}/monitors/model-quality'
-        self.mb_monitor_dir=f'{data_dir_uri}/monitors/model-bias'
-        self.me_monitor_dir=f'{data_dir_uri}/monitors/model-explainability'
-        self.mbt_monitor_dir=f'{data_dir_uri}/monitors/batch'
-        self.data_capture_dir=  f'{data_dir_uri}/capture'
-        self.ground_truth_dir=  f'{data_dir_uri}/ground-truth'
-        
-        self.monitor_instance_type=monitor_instance_type
-        self.sagemaker_session=sagemaker_session
+def create_scheduled_model_explainability_monitor(sm_client, role, name, deploy_type, schedule_expression, constraints_file, analysis_config_file, monitor_dir, endpoint_name=None, data_cature_dir=None, instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800):
     
-    def get_monitor_batch_transform_step(self, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None, depends_on=[]):
-
-
-        batch_transform_input = BatchTransformInput(
-            data_captured_destination_s3_uri=f'{self.data_capture_dir}',
-            dataset_format=MonitoringDatasetFormat(csv=MonitoringCsvDatasetFormat(header=True)),
-            local_path='/opt/ml/processing/input',
-            s3_input_mode='File',
-            s3_data_distribution_type='FullyReplicated', 
-            features_attribute=','.join(self.features),
-            inference_attribute=self.target,
-            probability_attribute=probability_attribute,
-            probability_threshold_attribute=probability_threshold_attribute,
-            start_time_offset="-PT2H",
-            end_time_offset="-PT1H",
-            exclude_features_attribute=exclude_features_attribute,
-            sagemaker_session=self.sagemaker_session
-        )
-
-        monitoring_resources = MonitoringResources(
-            cluster_config=MonitoringClusterConfig(
-                instance_count=1,
-                instance_type=self.monitor_instance_type,
-                volume_size_in_gb=5,
-                volume_kms_key_id=None
-            )
-        )
-        
-        monitoring_app_specification=MonitoringAppSpecification(
-            image_uri=retrieve_image(framework='model-monitor', region='us-east-1'), # required - the container to run
-            # container_entrypoint=['...'],       # optional - override entrypoint
-            # container_arguments=['...'],        # optional - override arguments
-            # record_preprocessor_source_uri='s3://...', # optional - preprocessing script
-            # post_analytics_processor_source_uri='s3://...' # optional - postprocessing script
-        )
-
-        monitoring_job_definition = MonitoringJobDefinition(
-            monitoring_inputs= [MonitoringInput(batch_transform_input=batch_transform_input)], 
-            monitoring_output_config=MonitoringOutputConfig(
-                monitoring_outputs=[
-                    MonitoringOutput(
-                        s3_output=MonitoringS3Output(
-                            local_path='/opt/ml/processing/input', 
-                            s3_uri='s3://omm-test-bucket/models/test/batch-output/'
-                        )
-                    )
-                ]
-            ),
-            monitoring_resources=monitoring_resources, 
-            monitoring_app_specification=monitoring_app_specification, 
-            role_arn=get_execution_role(), 
-            stopping_condition=MonitoringStoppingCondition(
-                max_runtime_in_seconds=400
-            ), 
-            environment={}, 
-            # network_config: NetworkConfig | None = Unassigned()
-        )
-
-        schedule_config = ScheduleConfig(
-            schedule_expression='cron(0 * ? * * *)', 
-            data_analysis_start_time="-PT1H", 
-            data_analysis_end_time="-PT2H"
-            )
-
-#################### MODEL QUALITY
-
-    def get_monitor_batch_transform_step(self, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None, depends_on=[]):
-
-        batch_transform_input = BatchTransformInput(
-            data_captured_destination_s3_uri=f'{self.data_capture_dir}',
-            dataset_format=MonitoringDatasetFormat(csv=MonitoringCsvDatasetFormat(header=True)),
-            local_path='/opt/ml/processing/input',
-            s3_input_mode='File',
-            s3_data_distribution_type='FullyReplicated', 
-            features_attribute=','.join(self.features),
-            inference_attribute=self.target,
-            probability_attribute=probability_attribute,
-            probability_threshold_attribute=probability_threshold_attribute,
-            start_time_offset="-PT2H",
-            end_time_offset="-PT1H",
-            exclude_features_attribute=exclude_features_attribute,
-            sagemaker_session=self.sagemaker_session
-        )
-
-        monitoring_resources = MonitoringResources(
-            cluster_config=MonitoringClusterConfig(
-                instance_count=1,
-                instance_type=self.monitor_instance_type,
-                volume_size_in_gb=5,
-                volume_kms_key_id=None
-            )
-        )
-
-        return [batch_transform_input, monitoring_resources]
+    if deploy_type == 'realtime':
+        monitoring_inputs=[{
+            "EndpointInput": {
+                "EndpointName": endpoint_name,
+                "LocalPath": "/opt/ml/processing/input/endpoint"
+            }
+        }]
+    else:
+        monitoring_inputs=[{
+            "BatchTransformInput": {
+                "DataCapturedDestinationS3Uri": f"{data_cature_dir}/",
+                "LocalPath": "/opt/ml/processing/input",
+                "DatasetFormat": {"Csv": {"Header": False}},
+                "InferenceAttribute": "0"
+            }
+        }]
     
-    def get_job_definition(self, monitoring_output, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None):
-
-        batch_transform_input, monitoring_resources=self.get_monitor_batch_transform_step(self.sagemaker_session)
-                                         
-        monitoring_app_specification=MonitoringAppSpecification(
-            image_uri=retrieve_image(framework='model-monitor', region='us-east-1'), # required - the container to run
-            # container_entrypoint=['...'],       # optional - override entrypoint
-            # container_arguments=['...'],        # optional - override arguments
-            # record_preprocessor_source_uri='s3://...', # optional - preprocessing script
-            # post_analytics_processor_source_uri='s3://...' # optional - postprocessing script
-        )
-
-        monitoring_job_definition = MonitoringJobDefinition(
-            monitoring_inputs= [MonitoringInput(batch_transform_input=batch_transform_input)], 
-            monitoring_output_config=MonitoringOutputConfig(
-                monitoring_outputs=[
-                    MonitoringOutput(
-                        s3_output=MonitoringS3Output(
-                            local_path='/opt/ml/processing/input', 
-                            s3_uri=monitoring_output
-                        )
-                    )]
-            ),
-            monitoring_resources=monitoring_resources, 
-            monitoring_app_specification=monitoring_app_specification, 
-            role_arn=get_execution_role(), 
-            stopping_condition=MonitoringStoppingCondition(
-                max_runtime_in_seconds=400
-            ), 
-            environment={}, 
-            # network_config: NetworkConfig | None = Unassigned()
-        )
-    
-        return monitoring_job_definition
-
-        schedule_config = ScheduleConfig(
-            schedule_expression='cron(0 * ? * * *)', 
-            data_analysis_start_time="-PT1H", 
-            data_analysis_end_time="-PT2H"
-            )
-
-    def get_batch_model_quality_step(self, transform_step, schedule_config, depends_on=[]):
-
-        monitoring_job_definition=self.get_job_definition(self.sagemaker_session, self.mq_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
-
-        model_dashboard_monitoring_schedule=ModelDashboardMonitoringSchedule(
-            batch_transform_input=transform_step.arguments['TransformInput'],
-            monitoring_schedule_config=MonitoringScheduleConfig(
-                schedule_config=schedule_config,
-                monitoring_job_definition_name="'ModelQualityJobDefinition",
-                monitoring_job_definition=monitoring_job_definition,
-                monitoring_type="ModelQuality" #DataQuality | ModelQuality | ModelBias | ModelExplainability
-            )
-        )
-
-        model_quality_check_config=ModelQualityCheckConfig(
-            baseline_dataset=f'{self.mq_monitor_dir}/baseline.csv', 
-            dataset_format={}, 
-            problem_type='Regression',
-            output_s3_uri=f'{self.mq_monitor_dir}/info'
-        )
-        
-        mq_monitor_step = MonitorBatchTransformStep(
-            name='ModelQualityMonitorStep',
-            monitor_configuration=model_quality_check_config,
-            transform_step_args=transform_step.arguments,
-            baseline_statistics=f'{self.mq_monitor_dir}/info/statistics.json',
-            baseline_constraints=f'{self.mq_monitor_dir}/info/constraints.json',
-            output_s3_uri=f'{self.mq_monitor_dir}/reports',
-            ground_truth_input=f'{self.ground_truth_dir}/',  # ground truth labels
-            fail_on_violation=False,
-            depends_on=depends_on,
-            sagemaker_session=self.sagemaker_session
-        )
-
-        return mq_monitor_step
-
-#################### MODEL BIAS
-    def get_batch_model_bias_step(self, transform_step, role, schedule_config, depends_on=[]):
-    
-        model_bias_check_config=ModelQualityCheckConfig(
-            baseline_dataset=f'{self.mb_monitor_dir}/baseline.csv', 
-            dataset_format={}, 
-            problem_type='Regression',
-            output_s3_uri=f'{self.mb_monitor_dir}/predictions'
-        )
-        
-        mb_monitor_step = MonitorBatchTransformStep(
-            name='ModelQualityMonitorStep',
-            monitor_configuration=model_bias_check_config,
-            transform_step_args=transform_step.arguments,
-            baseline_statistics=f'{self.mb_monitor_dir}/info/statistics.json',
-            baseline_constraints=f'{self.mb_monitor_dir}/info/constraints.json',
-            output_s3_uri=f'{self.mb_monitor_dir}/reports',
-            ground_truth_input='s3://omm-test-bucket/models/abalone/data/ground-truth/',  # ground truth labels
-            fail_on_violation=False,
-            sagemaker_session=self.sagemaker_session
-        )
-        return mb_monitor_step
-
-#################### DATA QUALITY
-    def get_batch_data_quality_step(self, transform_step, role, schedule_config, depends_on=[]):
-
-        monitoring_job_definition=self.get_job_definition(self.sagemaker_session, self.dq_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
-
-        model_dashboard_monitoring_schedule=ModelDashboardMonitoringSchedule(
-            batch_transform_input=transform_step.arguments['TransformInput'],
-            monitoring_schedule_config=MonitoringScheduleConfig(
-                schedule_config=schedule_config,
-                monitoring_job_definition_name="DataQualityJobDefinition",
-                monitoring_job_definition=monitoring_job_definition,
-                monitoring_type="DataQuality" #DataQuality | ModelQuality | ModelBias | ModelExplainability
-            )
-        )
-              
-        data_quality_config=DataQualityCheckConfig(
-                baseline_dataset=f'{self.dq_monitor_dir}/baseline.csv', 
-                dataset_format={}, 
-                output_s3_uri=f'{self.dq_monitor_dir}/predictions'
-        )
-        
-        dq_monitor_step = MonitorBatchTransformStep(
-            name='DataQualityMonitorStep',
-            monitor_configuration=data_quality_config,
-            transform_step_args=transform_step.arguments,
-            baseline_statistics=f'{self.dq_monitor_dir}/info/statistics.json',
-            baseline_constraints=f'{self.dq_monitor_dir}/info/constraints.json',
-            output_s3_uri=f'{self.dq_monitor_dir}/reports',
-            ground_truth_input=f'{self.ground_truth_dir}/',  # ground truth labels
-            fail_on_violation=False,
-            sagemaker_session=self.sagemaker_session
-        )
-
-        return dq_monitor_step
-
-#################### DATA BIAS
-    def get_batch_data_bias_step(self, transform_step, schedule_config, depends_on=[]):
-
-        monitoring_job_definition=self.get_job_definition(self.sagemaker_session, self.db_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
-
-        model_dashboard_monitoring_schedule=ModelDashboardMonitoringSchedule(
-            batch_transform_input=transform_step.arguments['TransformInput'],
-            monitoring_schedule_config=MonitoringScheduleConfig(
-                schedule_config=schedule_config,
-                monitoring_job_definition_name="DataBiasJobDefinition",
-                monitoring_job_definition=monitoring_job_definition,
-                monitoring_type="DataBias" #DataQuality | ModelQuality | ModelBias | ModelExplainability
-            )
-        )
-                
-        data_bias_check_config=ModelQualityCheckConfig(
-            baseline_dataset=f'{self.db_monitor_dir}/baseline.csv', 
-            dataset_format={}, 
-            problem_type='Regression',
-            output_s3_uri=f'{self.db_monitor_dir}/predictions'
-        )
-        
-        mq_monitor_step = MonitorBatchTransformStep(
-            name='ModelQualityMonitorStep',
-            monitor_configuration=data_bias_check_config,
-            transform_step_args=transform_step.arguments,
-            baseline_statistics=f'{self.db_monitor_dir}/info/statistics.json',
-            baseline_constraints=f'{self.db_monitor_dir}/info/constraints.json',
-            output_s3_uri=f'{self.db_monitor_dir}/reports',
-            ground_truth_input=f'{self.ground_truth_dir}/',  # ground truth labels
-            fail_on_violation=False,
-            sagemaker_session=self.sagemaker_session
-        )
-
-#################### EXPLAINABILITY
-    def get_batch_model_explainabilty_step(self, transform_step, role, schedule_config, depends_on=[]):
-
-        monitoring_job_definition=self.get_job_definition(self.sagemaker_session, self.me_monitor_dir, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
-
-        model_dashboard_monitoring_schedule=ModelDashboardMonitoringSchedule(
-            batch_transform_input=transform_step.arguments['TransformInput'],
-            monitoring_schedule_config=MonitoringScheduleConfig(
-                schedule_config=schedule_config,
-                monitoring_job_definition_name="ModelExplainabilityJobDefinition",
-                monitoring_job_definition=monitoring_job_definition,
-                monitoring_type="ModelExplainability" #DataQuality | ModelQuality | ModelBias | ModelExplainability
-            )
-        )
-                
-        model_explainabilty_check_config=ModelQualityCheckConfig(
-            baseline_dataset=f'{self.me_monitor_dir}/baseline.csv', 
-            dataset_format={}, 
-            problem_type='Regression',
-            output_s3_uri=f'{self.me_monitor_dir}/predictions'
-        )
-        
-        me_monitor_step = MonitorBatchTransformStep(
-            name='ModelQualityMonitorStep',
-            monitor_configuration=model_explainabilty_check_config,
-            transform_step_args=transform_step.arguments,
-            baseline_statistics=f'{self.me_monitor_dir}/info/statistics.json',
-            baseline_constraints=f'{self.me_monitor_dir}/info/constraints.json',
-            output_s3_uri=f'{self.me_monitor_dir}/reports',
-            ground_truth_input=f'{self.ground_truth_dir}/',  # ground truth labels
-            fail_on_violation=False,
-            sagemaker_session=self.sagemaker_session
-        )
-
-        return me_monitor_step
+    sm_client.create_monitoring_schedule(
+        MonitoringScheduleName=name,
+        MonitoringScheduleConfig={
+            "ScheduleConfig": {
+                "ScheduleExpression": schedule_expression
+            },
+            "MonitoringJobDefinition": {
+                "BaselineConfig": {
+                    "ConstraintsResource": {"S3Uri": constraints_file}
+                },
+                "MonitoringInputs": monitoring_inputs,
+                "MonitoringOutputConfig": {
+                    "MonitoringOutputs": [{
+                        "S3Output": {
+                            "S3Uri": f'{monitor_dir}/reports',
+                            "LocalPath": "/opt/ml/processing/output"
+                        }
+                    }]
+                },
+                "MonitoringResources": {
+                    "ClusterConfig": {
+                        "InstanceCount": 1,
+                        "InstanceType": instance_type,
+                        "VolumeSizeInGB": volume_size_in_gb
+                    }
+                },
+                "MonitoringAppSpecification": {
+                    "ImageUri": "205585389593.dkr.ecr.us-east-1.amazonaws.com/sagemaker-clarify-processing:1.0",
+                    "ConfigUri": analysis_config_file
+                },
+                "RoleArn": role,
+                "StoppingCondition": {"MaxRuntimeInSeconds": max_runtime_in_seconds}
+            },
+            "MonitoringType": "ModelExplainability"
+        }
+    )
