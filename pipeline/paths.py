@@ -1,10 +1,11 @@
 
 class Paths():
     def __init__(self, bucket_name, project_name, model_prefix):
-        self.project_dir=f's3://{bucket_name}/{project_name}/models/{model_prefix}'
-        self.data_dir=f'{self.project_dir}/data'
-        self.temp_data_dir=f'{self.project_dir}/data/temp'
-        self.model_dir=f'{self.project_dir}/model'
+        self.project_dir=f's3://{bucket_name}/{project_name}'
+        self.model_instance_dir=f'{self.project_dir}/models/{model_prefix}'
+        self.data_dir=f'{self.model_instance_dir}/data'
+        self.model_dir=f'{self.model_instance_dir}/model'
+        self.temp_data_dir=f'{self.data_dir}/temp'
 
         # model inputs
         self.train_dir=f'{self.data_dir}/input/train'

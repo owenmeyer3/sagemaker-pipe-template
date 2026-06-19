@@ -1,7 +1,6 @@
 from sagemaker.core.workflow.pipeline_context import PipelineSession
 from sagemaker.core.workflow.parameters import ParameterString
 from sagemaker.core.helper.session_helper import get_execution_role
-from sagemaker.core.lambda_helper import Lambda
 from sagemaker.core.image_uris import retrieve as retrieve_image
 from sagemaker.core.resources import Model
 from sagemaker.core.lambda_helper import Lambda
@@ -14,7 +13,7 @@ from sagemaker.mlops.workflow.model_step import ModelStep
 from sagemaker.mlops.workflow.steps import TransformStep
 from sagemaker.mlops.workflow.lambda_step import LambdaOutputTypeEnum, LambdaStep, LambdaOutput
 from sagemaker.mlops.workflow.monitor_batch_transform_step import MonitorBatchTransformStep
-import utils, baseline, boto3, argparse, monitor, json
+import utils, baseline, boto3, argparse, monitor, json, paths
 import pandas as pd
 
 class CPipeline(Pipeline):
@@ -36,30 +35,14 @@ class CPipeline(Pipeline):
         self.monitor_instance_type=monitor_instance_type
         self.endpoint_instance_type=endpoint_instance_type
         self.model_image_uri=retrieve_image('xgboost', 'us-east-1', version='1.5-1')
+        self.p=paths.Paths(project_bucket, 'abalone', 'abalone')
 
-        project_dir=       f's3://{project_bucket}/{project_path}'
-        data_dir=          f"{project_dir}/data"
-        self.model_dir=         f"{project_dir}/model"
-        self.data_capture_dir=  f'{data_dir}/capture'
-        self.transforms_dir=    f'{data_dir}/transforms'
-        self.ground_truth_dir=  f'{data_dir}/ground-truth'
-    
-        self.baseline_file=     f'{data_dir}/baseline/baseline.csv'
-        self.baseline_pred_file=f'{data_dir}/baseline/baseline_pred.csv'
-        self.baseline_X_file   =f'{data_dir}/input/test/test_X.csv'
-        self.train_file=        f'{data_dir}/input/train/train.csv'
-
-   
-
-        self.baseliner = baseline.Baseliner(model_name_param.to_string(), data_dir, self.baseline_file, self.train_file, monitor_instance_type, sagemaker_session)
-        self.monitor_maker = monitor.MonitorMaker(model_name_param.to_string(), data_dir, self.baseline_file, self.train_file, monitor_instance_type, sagemaker_session)
+        self.baseliner = baseline.Baseliner(model_name_param.default_value, self.p, monitor_instance_type, sagemaker_session)
 
         self.steps = []
         self.parameters = []
         if action == 'deploy':
-            self.steps = self.get_deploy_steps(        
-                deployment_type=deployment_type
-            )
+            self.steps = self.get_deploy_steps(deployment_type=deployment_type)
             self.parameters=[
                 self.model_package_arn_param,
                 self.model_name_param,
@@ -71,9 +54,7 @@ class CPipeline(Pipeline):
             ]
 
         elif action == 'inference':
-            self.steps = self.get_inference_steps(        
-                deployment_type=deployment_type
-            )
+            self.steps = self.get_inference_steps(deployment_type=deployment_type)
             self.parameters=[
                 self.model_package_group_name_param,
                 self.model_package_version_param,
@@ -84,12 +65,7 @@ class CPipeline(Pipeline):
         else:
             pass
 
-        super().__init__(
-            name=self.name,
-            parameters=self.parameters,
-            steps=self.steps,
-            sagemaker_session=self.sagemaker_session
-            )
+        super().__init__(name=self.name, parameters=self.parameters, steps=self.steps, sagemaker_session=self.sagemaker_session)
 
 
     def get_deploy_steps(self, deployment_type):
@@ -97,36 +73,29 @@ class CPipeline(Pipeline):
         self.baseliner.make_baseline_sets(self.target_name, self.prediction_name, target_type=float)
 
         if deployment_type == 'realtime':
+
+            make_baseline_sets_step = self.baseliner.get_make_baseline_sets_step(self.role_param, self.target_name, self.prediction_name, depends_on=[])
             
             get_model_step = self.get_model_from_registry_step()
 
             deploy_endpoint_step=self.get_deploy_endpoint_step(depends_on=[get_model_step])
 
-            data_quality_step = self.baseliner.get_data_quality_step(
-                self.role_param.default_value, depends_on=[deploy_endpoint_step]
-            )
-            data_bias_step = self.baseliner.get_data_bias_step(
-                self.role_param.default_value, depends_on=[deploy_endpoint_step]
-            )
-            model_quality_step = self.baseliner.get_model_quality_step(
-                self.role_param.default_value, depends_on=[deploy_endpoint_step]
-            )
-            model_bias_step = self.baseliner.get_model_bias_step(
-                self.role_param.default_value, depends_on=[deploy_endpoint_step]
-            )
-            model_explainability_step = self.baseliner.get_model_explainability_step(
-                self.role_param.default_value, depends_on=[deploy_endpoint_step]
-            )
+            data_quality_step = self.baseliner.get_data_quality_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
+            model_quality_step = self.baseliner.get_model_quality_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
+            model_bias_step = self.baseliner.get_model_bias_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
+            model_explainability_step = self.baseliner.get_model_explainability_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
 
             # ssm_step = self.get_ssm_step(self.name, writes={}, depends_on=[])
 
-            return [get_model_step, deploy_endpoint_step, data_quality_step, data_bias_step, model_quality_step, model_bias_step, model_explainability_step]#, ssm_step]
+            return [make_baseline_sets_step, get_model_step, deploy_endpoint_step, data_quality_step, model_quality_step, model_bias_step, model_explainability_step]#, ssm_step]
         
         elif deployment_type == 'batch':
 
+            make_baseline_sets_step = self.baseliner.get_make_baseline_sets_step(self.role_param, self.target_name, self.prediction_name, depends_on=[])
+
             get_model_step = self.get_model_from_registry_step()
 
-            batch_transform_step=self.get_batch_transform_step(self.baseline_X_file, depends_on=[get_model_step])
+            batch_transform_step=self.get_batch_transform_step(self.p.baseline_X_file, depends_on=[get_model_step])
 
             job_definition=self.baseline.get_job_definition(self.sagemaker_session, probability_attribute=None, probability_threshold_attribute=None, exclude_features_attribute=None)
 
@@ -139,7 +108,7 @@ class CPipeline(Pipeline):
             model_quality_step=self.get_batch_model_quality_step(self.sagemaker_session, batch_transform_step, schedule_config, depends_on=[])
 
 
-            return [get_model_step]
+            return [make_baseline_sets_step, get_model_step]
         else:
             return []
 
@@ -267,7 +236,7 @@ class CPipeline(Pipeline):
                 'model_name': self.model_name_param,
                 'endpoint_name': f'{self.model_package_group_name_param.default_value}-{self.model_package_version_param.default_value}-abalone-endpoint',
                 'instance_type': self.endpoint_instance_type,
-                'data_capture_path':self.data_capture_dir
+                'data_capture_path':self.p.data_capture_dir
             },
             outputs=[
                 LambdaOutput(
@@ -285,7 +254,7 @@ class CPipeline(Pipeline):
             model_name=self.model_name,
             instance_count=1,
             instance_type=self.monitor_instance_type,
-            output_path=f'{self.data_capture_dir}/transformations',
+            output_path=f'{self.p.data_capture_dir}/transformations',
             accept='text/csv',
             assemble_with='Line'
         )
@@ -440,7 +409,7 @@ def test_main():
     for pipeline in response['PipelineSummaries']:
         print(pipeline['PipelineName'])
     
-    # delet monitors and endpoint
+    # delete monitors and endpoint
     import boto3
     sm_client = boto3.client('sagemaker', region_name='us-east-1')
     endpoint_name='abalone-endpoint'

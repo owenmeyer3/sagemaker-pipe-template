@@ -1,30 +1,46 @@
-import boto3, time, logging
+import boto3, logging
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 ##############################################
+############### DELETE MONITORS JOBS ##############
+##############################################
+def delete_monitor_job(sm_client, endpoint_name, monitoring_type): # 'DataQuality':|'ModelQuality'|'ModelBias'|'ModelExplainability'
+    if monitoring_type == 'DataQuality':
+        for job in sm_client.list_data_quality_job_definitions(EndpointName=endpoint_name)['JobDefinitionSummaries']:
+            logger.info(f"DELETING:{job['MonitoringJobDefinitionName']}")
+            response = sm_client.delete_data_quality_job_definition(JobDefinitionName=job['MonitoringJobDefinitionName'])
+    elif monitoring_type == 'ModelQuality':
+        for job in sm_client.list_model_quality_job_definitions(EndpointName=endpoint_name)['JobDefinitionSummaries']:
+            logger.info(f"DELETING:{job['MonitoringJobDefinitionName']}")
+            response = sm_client.delete_model_quality_job_definition(JobDefinitionName=job['MonitoringJobDefinitionName'])
+    elif monitoring_type == 'ModelBias':
+        for job in sm_client.list_model_bias_job_definitions(EndpointName=endpoint_name)['JobDefinitionSummaries']:
+            logger.info(f"DELETING:{job['MonitoringJobDefinitionName']}")
+            response = sm_client.delete_model_bias_job_definition(JobDefinitionName=job['MonitoringJobDefinitionName'])
+    elif monitoring_type == 'ModelExplainability':
+        for job in sm_client.list_model_explainability_job_definitions(EndpointName=endpoint_name)['JobDefinitionSummaries']:
+            logger.info(f"DELETING:{job['MonitoringJobDefinitionName']}")
+            response = sm_client.delete_model_explainability_job_definition(JobDefinitionName=job['MonitoringJobDefinitionName'])
+    else:
+        logger.info(f" INVALID monitoring_type. Choose 'DataQuality':|'ModelQuality'|'ModelBias'|'ModelExplainability' ")
+
+
+##############################################
 ############### DELETE MONITORS ##############
 ##############################################
-def delete_data_quality_monitors(sm_client, endpoint_name):
-    for job in sm_client.list_data_quality_job_definitions(EndpointName=endpoint_name)['JobDefinitionSummaries']:
-        logger.info(f"DELETING:{job['MonitoringJobDefinitionName']}")
+def delete_monitor(sm_client, endpoint_name, monitoring_type): # 'DataQuality':|'ModelQuality'|'ModelBias'|'ModelExplainability'
+    schedules = sm_client.list_monitoring_schedules(EndpointName=endpoint_name)
+    for schedule in schedules['MonitoringScheduleSummaries']:
+        name=schedule['MonitoringScheduleName']
+        logger.info(f"schedule: {name}")
+        detail = sm_client.describe_monitoring_schedule(MonitoringScheduleName=name)
+        logger.info(detail['MonitoringType'])
+        if detail['MonitoringType'] == monitoring_type:
+            logger.info(f'deleting {detail['MonitoringType']} monitor: {name}')
+            response = sm_client.delete_monitoring_schedule(MonitoringScheduleName=name)
 
-        response = sm_client.delete_data_quality_job_definition(JobDefinitionName=job['MonitoringJobDefinitionName'])
-def delete_model_bias_monitors(sm_client, endpoint_name):
-    for job in sm_client.list_model_bias_job_definitions(EndpointName=endpoint_name)['JobDefinitionSummaries']:
-        logger.info(f"DELETING:{job['MonitoringJobDefinitionName']}")
-        response = sm_client.delete_model_bias_job_definition(JobDefinitionName=job['MonitoringJobDefinitionName'])
-
-def delete_model_quality_monitors(sm_client, endpoint_name):
-    for job in sm_client.list_model_quality_job_definitions(EndpointName=endpoint_name)['JobDefinitionSummaries']:
-        logger.info(f"DELETING:{job['MonitoringJobDefinitionName']}")
-        response = sm_client.delete_model_quality_job_definition(JobDefinitionName=job['MonitoringJobDefinitionName'])
-
-def delete_model_explainability_monitors(sm_client, endpoint_name):
-    for job in sm_client.list_model_explainability_job_definitions(EndpointName=endpoint_name)['JobDefinitionSummaries']:
-        logger.info(f"DELETING:{job['MonitoringJobDefinitionName']}")
-        response = sm_client.delete_model_explainability_job_definition(JobDefinitionName=job['MonitoringJobDefinitionName'])
 
 ##############################################
 ############### JOB DEFINITIONS ##############
@@ -607,59 +623,23 @@ def create_model_quality_monitoring_schedule(
     return response
 
 
+def data_quality_handler(event, context):
+    monitoring_type='DataQuality'
 
-
-def endpoint_exists(sm_client, endpoint_name):
-    try:
-        sm_client.describe_endpoint(EndpointName=endpoint_name)
-        return True
-    except sm_client.exceptions.ClientError:
-        return False
-
-
-def endpoint_config_exists(sm_client, config_name):
-    try:
-        sm_client.describe_endpoint_config(EndpointConfigName=config_name)
-        return True
-    except sm_client.exceptions.ClientError:
-        return False
-
-# create_model_step = LambdaStep(
-#     name='ScheduleModelQualityMonitor',
-#     lambda_func=schedule_model_quality_monitor,
-#     inputs={
-#         'endpoint_name': endpoint_name,
-#         'role': role,
-#         'deploy_type': deploy_type,
-#         'name': name,
-#         'monitor_dir': monitor_dir,
-#         'schedule_expression': schedule_expression,
-#         'data_analysis_start_time': data_analysis_start_time,
-#         'data_analysis_end_time': data_analysis_end_time,
-#         'vpc_config': {'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']},
-#         'endpoint_name': endpoint_name,
-#         'data_cature_dir': data_cature_dir,
-#     }
-# )
-def handler(event, context):
-    
-    endpoint_name = event['endpoint_name']
+    endpoint_name = event['endpoint_name'] if 'endpoint_name' in event else None
+    data_cature_dir = event['data_cature_dir'] if 'data_cature_dir' in event else None
+    name = event['name']
     role = event['role']
     deploy_type = event['deploy_type']
-    name = event['name']
     monitor_dir = event['monitor_dir']
     schedule_expression = event['schedule_expression']
     data_analysis_start_time = event['data_analysis_start_time']
     data_analysis_end_time = event['data_analysis_end_time']
     vpc_config = event['vpc_config'] # {'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
-    endpoint_name = event['endpoint_name']
-    data_cature_dir = event['data_cature_dir']
 
     sm_client = boto3.client('sagemaker')
-
-    endpoint_name = event['endpoint_name']
-
-    delete_monitors(sm_client, endpoint_name)
+    delete_monitor(sm_client, endpoint_name, monitoring_type)
+    delete_monitor_job(sm_client, endpoint_name, monitoring_type)
 
     result = create_data_quality_monitoring_schedule(
         sm_client, 
@@ -674,5 +654,111 @@ def handler(event, context):
         endpoint_name=endpoint_name, 
         data_cature_dir=data_cature_dir
     )
+    return {'result': result}
 
+def model_bias_handler(event, context):
+    monitoring_type='ModelBias'
+
+    endpoint_name = event['endpoint_name'] if 'endpoint_name' in event else None
+    data_cature_dir = event['data_cature_dir'] if 'data_cature_dir' in event else None
+    name = event['name']
+    role = event['role']
+    deploy_type = event['deploy_type']
+    monitor_dir = event['monitor_dir']
+    ground_truth_dir = event['ground_truth_dir']
+    schedule_expression = event['schedule_expression']
+    data_analysis_start_time = event['data_analysis_start_time']
+    data_analysis_end_time = event['data_analysis_end_time']
+    vpc_config = event['vpc_config'] # {'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+
+    sm_client = boto3.client('sagemaker')
+    delete_monitor(sm_client, endpoint_name, monitoring_type)
+    delete_monitor_job(sm_client, endpoint_name, monitoring_type)
+
+    result = create_model_bias_monitoring_schedule(
+        sm_client, 
+        name,
+        role,
+        deploy_type,
+        monitor_dir,
+        ground_truth_dir,
+        schedule_expression, 
+        data_analysis_start_time, 
+        data_analysis_end_time,
+        vpc_config=vpc_config,
+        endpoint_name=endpoint_name, 
+        data_cature_dir=data_cature_dir
+    )
+    return {'result': result}
+
+def model_explainability_handler(event, context):
+    monitoring_type='ModelExplainability'
+
+    endpoint_name = event['endpoint_name'] if 'endpoint_name' in event else None
+    data_cature_dir = event['data_cature_dir'] if 'data_cature_dir' in event else None
+    name = event['name']
+    role = event['role']
+    deploy_type = event['deploy_type']
+    monitor_dir = event['monitor_dir']
+    schedule_expression = event['schedule_expression']
+    data_analysis_start_time = event['data_analysis_start_time']
+    data_analysis_end_time = event['data_analysis_end_time']
+    vpc_config = event['vpc_config'] # {'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+    
+    sm_client = boto3.client('sagemaker')
+    delete_monitor(sm_client, endpoint_name, monitoring_type)
+    delete_monitor_job(sm_client, endpoint_name, monitoring_type)
+
+    result = create_model_explainability_monitoring_schedule(
+        sm_client, 
+        name,
+        role,
+        deploy_type,
+        monitor_dir,
+        schedule_expression, 
+        data_analysis_start_time, 
+        data_analysis_end_time,
+        vpc_config=vpc_config,
+        endpoint_name=endpoint_name, 
+        data_cature_dir=data_cature_dir
+    )
+    return {'result': result}
+
+def model_quality_handler(event, context):
+    monitoring_type='ModelQuality'
+
+    endpoint_name = event['endpoint_name'] if 'endpoint_name' in event else None
+    data_cature_dir = event['data_cature_dir'] if 'data_cature_dir' in event else None
+    name = event['name']
+    role = event['role']
+    deploy_type = event['deploy_type']
+    problem_type = event['problem_type'] # 'BinaryClassification'|'MulticlassClassification'|'Regression'
+    ground_truth_label = event['ground_truth_label']
+    monitor_dir = event['monitor_dir']
+    ground_truth_dir = event['ground_truth_dir']
+    schedule_expression = event['schedule_expression']
+    data_analysis_start_time = event['data_analysis_start_time']
+    data_analysis_end_time = event['data_analysis_end_time']
+    vpc_config = event['vpc_config'] # {'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+
+    sm_client = boto3.client('sagemaker')
+    delete_monitor(sm_client, endpoint_name, monitoring_type)
+    delete_monitor_job(sm_client, endpoint_name, monitoring_type)
+
+    result = create_model_quality_monitoring_schedule(
+        sm_client, 
+        name,
+        role,
+        deploy_type,
+        problem_type,
+        ground_truth_label,
+        monitor_dir,
+        ground_truth_dir,
+        schedule_expression, 
+        data_analysis_start_time, 
+        data_analysis_end_time,
+        vpc_config=vpc_config,
+        endpoint_name=endpoint_name, 
+        data_cature_dir=data_cature_dir
+    )
     return {'result': result}
