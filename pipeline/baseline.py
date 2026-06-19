@@ -15,57 +15,32 @@ from sagemaker.mlops.workflow.check_job_config import CheckJobConfig
 from sagemaker.mlops.workflow.clarify_check_step import ClarifyCheckStep, ModelBiasCheckConfig, ModelExplainabilityCheckConfig, DataBiasCheckConfig
 from sagemaker.mlops.workflow.lambda_step import LambdaOutputTypeEnum, LambdaStep, LambdaOutput
 from sagemaker.core.lambda_helper import Lambda
+from sagemaker.core.workflow.functions import Join
 
 
 
 
 class Baseliner():
 
-    def __init__(self, model_name, paths, monitor_instance_type, sagemaker_session=None):
-        self.model_name=model_name
-        self.p= paths   
-        self.monitor_instance_type=monitor_instance_type
+    def __init__(self, model_name_param, p_params, monitor_instance_type_param, sagemaker_session=None):
+        self.model_name_param=model_name_param
+        self.p_params=p_params   
+        self.monitor_instance_type_param=monitor_instance_type_param
         self.sagemaker_session=sagemaker_session
-
-    def make_baseline_sets(self, target_name, prediction_name, target_type=float):
-
-        baseline=pd.read_csv(self.p.baseline_file, header=0)
-        baseline_pred=pd.read_csv(self.p.baseline_pred_file, header=None)
-        baseline_pred.columns=[prediction_name]
-        baseline_full = pd.concat([baseline_pred, baseline], axis=1)
-        baseline_full[target_name] = baseline_full[target_name].astype(target_type)
-        baseline_full[prediction_name] = baseline_full[prediction_name].astype(target_type)
-
-        # Data Quality → input features only
-        baseline_full.drop(columns=[target_name, prediction_name]).to_csv(f'{self.p.dq_monitor_dir}/baseline.csv', index=False, header=True)
-
-        # Data Bias → input features + target
-        baseline_full.drop(columns=[prediction_name]).to_csv(f'{self.p.dq_monitor_dir}/baseline.csv', index=False, header=True)
-
-        # Model Quality → predictions + ground truth labels
-        baseline_full[[target_name, prediction_name]].to_csv(f'{self.p.mq_monitor_dir}/baseline.csv', index=False, header=True)
-
-        # Model Bias → features + predictions + labels
-        baseline_full.to_csv(f'{self.p.mb_monitor_dir}/baseline.csv', index=False, header=True)
-
-        # Model Explainability → input features + predictions (uses SHAP values)
-        baseline_full.drop(columns=[target_name]).to_csv(f'{self.p.me_monitor_dir}/baseline.csv', index=False, header=True)
-
-        train=pd.read_csv(self.p.train_file, header=None)
-        train_X = train.iloc[:, 1:]
-        train_X.to_csv(self.p.train_X_file, index=False, header=False)
 
     def get_make_baseline_sets_step(
             self, 
             role_param, 
-            target_name, 
-            prediction_name, 
+            target_name_param, 
+            prediction_name_param,
+            build_role_arn,
+            target_type_param,
             depends_on=[]
     ):
         # make create model step
         lambda_function = Lambda(
             function_name='MakeBaselineSets',
-            execution_role_arn=role_param.default_value,
+            execution_role_arn=build_role_arn,
             script='scripts/make_baseline_sets.py',  # path to your file
             handler='make_baseline_sets.handler',    # filename.function_name
             timeout=60,
@@ -76,18 +51,19 @@ class Baseliner():
             name='MakeBaselineSetsStep',
             lambda_func=lambda_function,
             inputs={
-                'baseline_file':self.p.baseline_file,
-                'baseline_pred_file':self.p.baseline_pred_file,
-                'dq_monitor_dir':self.p.dq_monitor_dir,
-                'db_monitor_dir':self.p.db_monitor_dir,
-                'mq_monitor_dir':self.p.mq_monitor_dir,
-                'mb_monitor_dir':self.p.mb_monitor_dir,
-                'me_monitor_dir':self.p.me_monitor_dir,
-                'target_name':target_name,
-                'prediction_name':prediction_name,
-                'train_file':self.p.train_file,
-                'train_X_file':self.p.train_X_file,
-                'target_type':self.p.target_type
+                'role': role_param,
+                'baseline_file':self.p_params.baseline_file_param,
+                'baseline_pred_file':self.p_params.baseline_pred_file_param,
+                'dq_monitor_dir':self.p_params.dq_monitor_dir_param,
+                'db_monitor_dir':self.p_params.db_monitor_dir_param,
+                'mq_monitor_dir':self.p_params.mq_monitor_dir_param,
+                'mb_monitor_dir':self.p_params.mb_monitor_dir_param,
+                'me_monitor_dir':self.p_params.me_monitor_dir_param,
+                'target_name':target_name_param,
+                'prediction_name':prediction_name_param,
+                'train_file':self.p_params.train_file_param,
+                'train_X_file':self.p_params.train_X_file_param,
+                'target_type':target_type_param
             },
             outputs=[
                 LambdaOutput(output_name='result', output_type=LambdaOutputTypeEnum.String),
@@ -96,17 +72,17 @@ class Baseliner():
         )
         return create_model_step
 
-    def get_data_quality_baseline_step(self, action, role, depends_on=[]):
+    def get_data_quality_baseline_step(self, role_param, depends_on=[]):
 
         dq_baseline_step = QualityCheckStep(
             name='DataQualityBaselineStep',
             quality_check_config=DataQualityCheckConfig(
-                baseline_dataset=f'{self.p.dq_monitor_dir}/baseline.csv',
+                baseline_dataset=Join(on='/', values=[self.p_params.dq_monitor_dir_param, 'baseline.csv']),
                 dataset_format=DatasetFormat.csv(header=True),
-                output_s3_uri=f'{self.p.dq_monitor_dir}/info'
+                output_s3_uri=Join(on='/', values=[self.p_params.dq_monitor_dir_param, 'info']),
             ),
             check_job_config=CheckJobConfig(
-                role=role,
+                role=role_param,
                 instance_count=1,
                 instance_type=self.monitor_instance_type,
                 volume_size_in_gb=20,
@@ -121,14 +97,14 @@ class Baseliner():
         return dq_baseline_step
 
 
-    def get_data_bias_baseline_step(self, role, depends_on=[]):
+    def get_data_bias_baseline_step(self, target_param, role_param, depends_on=[]):
         db_baseline_step = ClarifyCheckStep(
             name='DataBiasBaselineStep',
             clarify_check_config=DataBiasCheckConfig(
                 data_config=DataConfig(
-                    s3_data_input_path=f'{self.p.db_monitor_dir}/baseline.csv',
-                    s3_output_path=f'{self.p.db_monitor_dir}/info',
-                    label='rings',
+                    s3_data_input_path=Join(on='/', values=[self.p_params.db_monitor_dir_param, 'baseline.csv']),
+                    s3_output_path=Join(on='/', values=[self.p_params.db_monitor_dir_param, 'info']),
+                    label=target_param,
                     dataset_type='text/csv'
                 ),
                 data_bias_config=BiasConfig(
@@ -139,7 +115,7 @@ class Baseliner():
                 methods='all'
             ),
             check_job_config=CheckJobConfig(
-                role=role,
+                role=role_param,
                 instance_count=1,
                 instance_type=self.monitor_instance_type,
                 volume_size_in_gb=20,
@@ -153,7 +129,7 @@ class Baseliner():
 
         return db_baseline_step
 
-    def get_model_quality_baseline_step(self, role, depends_on=[]):
+    def get_model_quality_baseline_step(self, role_param, depends_on=[]):
 
         mq_baseline_step = QualityCheckStep(
             name='ModelQualityBaselineStep',
@@ -165,7 +141,7 @@ class Baseliner():
                 output_s3_uri=f'{self.p.dq_monitor_dir}/info'
             ),
             check_job_config=CheckJobConfig(
-                role=role,
+                role=role_param,
                 instance_count=1,
                 instance_type=self.monitor_instance_type,
                 volume_size_in_gb=20,
@@ -180,7 +156,7 @@ class Baseliner():
         return mq_baseline_step
 
 
-    def get_model_bias_baseline_step(self, role, depends_on=[]):
+    def get_model_bias_baseline_step(self, role_param, depends_on=[]):
 
         mb_baseline_step = ClarifyCheckStep(
             name='ModelBiasBaselineStep',
@@ -214,7 +190,7 @@ class Baseliner():
                 methods='all'
             ),
             check_job_config=CheckJobConfig(
-                role=role,
+                role=role_param,
                 instance_count=1,
                 instance_type=self.monitor_instance_type,
                 volume_size_in_gb=20,
@@ -228,7 +204,7 @@ class Baseliner():
 
         return mb_baseline_step
 
-    def get_model_explainability_baseline_step(self, role, depends_on=[]):
+    def get_model_explainability_baseline_step(self, role_param, depends_on=[]):
 
         X_train = pd.read_csv(self.p.train_X_file, header=None)
 
@@ -254,7 +230,7 @@ class Baseliner():
                 )
             ),
             check_job_config=CheckJobConfig(
-                role=role,
+                role=role_param,
                 instance_count=1,
                 instance_type=self.monitor_instance_type,
                 volume_size_in_gb=20,

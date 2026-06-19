@@ -18,9 +18,9 @@ def handler(event, context):
 
     # Set input vars
     if 'writes' in event:
-        input_dicts = event['writes']
-        for name, value in input_dicts.items():
-            set_param(ssm, scope, name, value, type='String')
+        input_dicts = event['writes'] # [{'name':name, 'value':value, 'type':type}, {'name':name, 'value':value, 'type':type}]
+        for dict in input_dicts:
+            set_param(ssm, scope, dict['name'], dict['value'], type=dict['type'])
 
     # Return project data
     params = get_params(ssm, scope)  # includes nested paths
