@@ -29,8 +29,8 @@ def create_scheduled_data_quality_monitor(
             'MonitoringJobDefinition': {
                 'BaselineConfig': {
                     #'BaseliningJobName': 'string',
-                    "ConstraintsResource": {"S3Uri": f'{monitor_dir}/constraints.json'},
-                    "StatisticsResource": {"S3Uri": f'{monitor_dir}/statistics.json'}
+                    "ConstraintsResource": {"S3Uri": f'{monitor_dir}/info/constraints.json'},
+                    "StatisticsResource": {"S3Uri": f'{monitor_dir}/info/statistics.json'}
                 },
                 'MonitoringInputs': [job_input],
                 'MonitoringOutputConfig': {

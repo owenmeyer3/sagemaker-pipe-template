@@ -1,7 +1,7 @@
 import utils, datetime, sagemaker, boto3, importlib
 import pandas as pd
 import numpy as np
-import paths as p
+import pipeline.paths as p
 from sagemaker.model_monitor.dataset_format import DatasetFormat
 
 data_bucket='omm-test-bucket'

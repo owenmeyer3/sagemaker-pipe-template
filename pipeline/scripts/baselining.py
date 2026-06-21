@@ -19,7 +19,6 @@ def df_to_s3(df, s3_uri, index=False, header=True):
     bucket, key = parse_s3_uri(s3_uri)
     s3.put_object(Bucket=bucket, Key=key, Body=csv_buffer.getvalue())
 
-
 def make_baseline_sets(
     baseline_file,
     baseline_pred_file,
@@ -102,7 +101,44 @@ def make_baseline_sets(
     return None
 
 
-def handler(event, context):
+def prep_baseline_sets_handler(event, context):
+    baseline_file = event['baseline_file']
+    target_name = event['target_name']
+    target_type = event['target_type']
+    baseline_X_file_dest_dir = event['baseline_X_file_dest_dir']
+
+    # get baseline X
+    baseline=pd.read_csv(baseline_file, header=0) # baseline file == validation file
+    baseline[target_name] = baseline[target_name].astype(target_type)
+    baseline_X = baseline.drop(columns=[target_name])
+    baseline_X.to_csv(f'{baseline_X_file_dest_dir}/baseline_X.csv', index=False, header=False)
+
+    return {
+        'baseline_X_dir': baseline_X_file_dest_dir,
+        'baseline_X_filename': 'baseline_X.csv'
+    }
+
+
+def get_baseline_preds_handler(event, context):
+    transform_out_dir = event['transform_out_dir']
+    baseline_X_filename = event['baseline_X_filename']
+    baseline_pred_file_dest = event['baseline_pred_file_dest']
+
+    transformer_out_file = f'{transform_out_dir}/{baseline_X_filename}.out'
+
+    # move file to dest
+    s3_client = boto3.client('s3')
+    uri_1_bucket, uri_1_key = parse_s3_uri(transformer_out_file)
+    uri_2_bucket, uri_2_key = parse_s3_uri(baseline_pred_file_dest)
+    s3_client.copy_object(CopySource={'Bucket': uri_1_bucket, 'Key': uri_1_key}, Bucket=uri_2_bucket, Key=uri_2_key)
+    s3_client.delete_object(Bucket=uri_1_bucket, Key=uri_1_key)
+
+    return {
+        'baseline_pred_file': baseline_pred_file_dest
+    }
+
+
+def make_baseline_sets_handler(event, context):
     baseline_file = event['baseline_file']
     baseline_pred_file = event['baseline_pred_file']
     dq_monitor_dir = event['dq_monitor_dir']

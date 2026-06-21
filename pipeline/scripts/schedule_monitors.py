@@ -95,8 +95,8 @@ def create_data_quality_job_definition(
         JobDefinitionName=name,
         DataQualityBaselineConfig={
             #'BaseliningJobName': 'string',
-            "ConstraintsResource": {"S3Uri": f'{monitor_dir}/constraints.json'},
-            "StatisticsResource": {"S3Uri": f'{monitor_dir}/statistics.json'}
+            "ConstraintsResource": {"S3Uri": f'{monitor_dir}/info/constraints.json'},
+            "StatisticsResource": {"S3Uri": f'{monitor_dir}/info/statistics.json'}
         },
         DataQualityAppSpecification={
             'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer"#,
@@ -194,7 +194,7 @@ def create_model_bias_job_definition(
         JobDefinitionName=name,
         ModelBiasBaselineConfig={
             #'BaseliningJobName': 'string',
-            "ConstraintsResource": {"S3Uri": f'{monitor_dir}/constraints.json'}
+            "ConstraintsResource": {"S3Uri": f'{monitor_dir}/info/constraints.json'}
         },
         ModelBiasAppSpecification={
             'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
@@ -288,7 +288,7 @@ def create_model_explainability_job_definition(
         JobDefinitionName=name,
         ModelExplainabilityBaselineConfig={
             #'BaseliningJobName': 'string',
-            "ConstraintsResource": {"S3Uri": f'{monitor_dir}/constraints.json'}
+            "ConstraintsResource": {"S3Uri": f'{monitor_dir}/info/constraints.json'}
         },
         ModelExplainabilityAppSpecification={
             'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
@@ -386,7 +386,7 @@ def create_model_quality_job_definition(
         JobDefinitionName=name,
         ModelQualityBaselineConfig={
             #'BaseliningJobName': 'string',
-            "ConstraintsResource": {"S3Uri": f'{monitor_dir}/constraints.json'}
+            "ConstraintsResource": {"S3Uri": f'{monitor_dir}/info/constraints.json'}
         },
         ModelQualityAppSpecification={
             'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",

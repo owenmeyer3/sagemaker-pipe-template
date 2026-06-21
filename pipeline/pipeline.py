@@ -1,5 +1,5 @@
 from sagemaker.core.workflow.pipeline_context import PipelineSession
-from sagemaker.core.workflow.parameters import ParameterString, ParameterInteger
+from sagemaker.core.workflow.parameters import ParameterString, ParameterInteger, ParameterBool
 from sagemaker.core.helper.session_helper import get_execution_role
 from sagemaker.core.image_uris import retrieve as retrieve_image
 from sagemaker.core.resources import Model
@@ -16,58 +16,70 @@ from sagemaker.mlops.workflow.steps import TransformStep
 from sagemaker.mlops.workflow.lambda_step import LambdaOutputTypeEnum, LambdaStep, LambdaOutput
 from sagemaker.mlops.workflow.monitor_batch_transform_step import MonitorBatchTransformStep
 from sagemaker.mlops.workflow.condition_step import ConditionStep
-import utils, baseline, boto3, argparse, monitor, json, paths, datetime, time
+import utils, baseline, boto3, argparse, monitor, json, paths, datetime, time, steps
 import pandas as pd
 
+
 class CPipeline(Pipeline):
-    def __init__(self, sagemaker_session, build_role_arn, name, deployment_type, target_name, target_type, prediction_name):
+    def __init__(self, 
+        sagemaker_session, 
+        name, 
+        pipeline_bucket,
+        deployment_type, 
+        target_name, 
+        target_type, 
+        prediction_name, 
+        model_package_name,
+        region_name, 
+        lambda_execution_role_arn, 
+        other_execution_role_arn
+    ):
 
         self.sagemaker_session = sagemaker_session
-        self.build_role_arn=build_role_arn
+        self.region_name = region_name
         self.name = name
+        self.pipeline_bucket=pipeline_bucket
         self.deployment_type=deployment_type
         self.target_name=target_name
         self.target_type = target_type
         self.prediction_name_param=prediction_name
-        self.model_package_group_name_param = ParameterString(name='ModelPackageGroupName', default_value='abalone')
-        self.model_package_version_param = ParameterInteger(name='ModelPackageVersion', default_value=1)
-        self.runtime_role_param = ParameterString(name='RuntimeRole', default_value='arn:aws:iam::088461143167:role/SageMakerExecutionRole-1')
-        self.action_param = ParameterString(name='Action', default_value='deploy', enum_values=['deploy', 'inference'])
-        self.project_bucket_param = ParameterString(name='ProjectBucket', default_value='abalone')
-        self.project_path_param = ParameterString(name='ProjectPath', default_value='abalone')
-        self.monitor_instance_type_param = ParameterString(name='MonitorInstanceType', default_value='ml.m5.large')
-        self.endpoint_instance_type_param = ParameterString(name='EndpointInstanceType', default_value='ml.m5.large')
-        self.transform_instance_type_param = ParameterString(name='EndpointInstanceType', default_value='ml.m5.large')
-        self.training_bucket_param = ParameterString(name='TrainingBucket', default_value='omm-test-bucket')
-        self.training_dir_param = ParameterString(name='TrainingDir', default_value='projects/abalone/models/abalone')
-        self.pipeline_bucket_param = ParameterString(name='PipelineBucket', default_value='omm-test-bucket')
+        self.model_package_group_name=model_package_name
+        self.lambda_execution_role_arn=lambda_execution_role_arn
+        self.other_execution_role_arn=other_execution_role_arn
+
+        self.model_package_version_param =                  ParameterInteger(name='ModelPackageVersion',                default_value=1)
+        self.action_param =                                 ParameterString( name='Action',                                                 enum_values=['deploy', 'inference'])
+        self.baseline_file_param =                          ParameterString( name='BaselineFile')
+        self.monitor_instance_type_param =                  ParameterString( name='MonitorInstanceType',                 default_value='ml.m5.large')
+        self.endpoint_instance_type_param =                 ParameterString( name='EndpointInstanceType',                default_value='ml.m5.large')
+        self.transform_instance_type_param =                ParameterString( name='TransformInstanceType',               default_value='ml.m5.large')
+        self.fail_on_violation_param =                      ParameterBool(   name='FailOnViolation',                     default_value=False)
+        self.register_new_baseline_param =                  ParameterBool(   name='RegisterNewBaseline',                 default_value=False)
+        self.schedule_expression_param =                    ParameterString( name='MonitorScheduleExpression',           default_value='cron(0 * ? * * *)')
+        self.enable_data_quality_monitoring_param =         ParameterBool(   name='EnableDataQualityMonitoring',         default_value=True)
+        self.enable_model_bias_monitoring_param =           ParameterBool(   name='EnableModelBiasMonitoring',           default_value=True)
+        self.enable_model_explainability_monitoring_param = ParameterBool(   name='EnableModelExplainabilityMonitoring', default_value=True)
+        self.enable_model_quality_monitoring_param =        ParameterBool(   name='EnableModelQualityMonitoring',        default_value=True)
+        self.environment_param =                            ParameterString( name='Environment',                         default_value='dev', enum_values=['prd', 'dev', 'stg'])
+        self.sns_topic_arn_param =                          ParameterString( name='SNSTopicArn',                         default_value='')
+        self.sns_notify_param =                             ParameterBool(   name='SNSNotifyBool',                       default_value=False)
+        self.ground_truth_dir_param =                       ParameterString( name='GroundTruthDir',                      default_value=f's3://{pipeline_bucket}/ground-truth/{model_package_name}')
+        self.batch_input_dir_param =                        ParameterString( name='GroundTruthDir',                      default_value=f's3://{pipeline_bucket}/batch_input/{model_package_name}')
+
+        self.paths={
+
+        }
+
+
+
         self.p_params = paths.PathParams(self.training_bucket_param, self.training_dir_param, self.pipeline_bucket_param, self.name)
 
-        
-
         # GET / CREATE MODEL
-        get_or_create_model_from_registry_step = LambdaStep(
-            name='GetModelStep',
-            lambda_func=Lambda(
-                function_name='GetOrCreateModelFromRegistry',
-                execution_role_arn=build_role_arn,
-                script='scripts/get_or_create_model_from_registry.py',  # path to your file
-                handler='get_or_create_model_from_registry.handler',    # filename.function_name
-                timeout=60,
-                memory_size=128
-            ),
-            inputs={
-                'model_package_group_name': self.model_package_group_name_param,
-                'model_package_version': self.model_package_version_param,
-                'role': self.runtime_role_param
-            },
-            outputs=[
-                LambdaOutput(output_name='model_name', output_type=LambdaOutputTypeEnum.String),
-                LambdaOutput(output_name='model_package_arn', output_type=LambdaOutputTypeEnum.String)
-            ],
-            depends_on=[]
-        )
+        get_or_create_model_from_registry_step = steps.GetOrCreateModelFromRegistryStep('GetOrCreateModelFromRegistry', build_role_arn, self.model_package_group_name_param, self.model_package_version_param, self.runtime_role_param)
         self.model_name_param = get_or_create_model_from_registry_step.properties.Outputs['model_name']
+        self.model_package_arn_param = get_or_create_model_from_registry_step.properties.Outputs['model_package_arn']
+
+
         self.baseliner = baseline.Baseliner(self.model_name_param, self.p_params, self.monitor_instance_type_param, self.sagemaker_session)
 
         ###########################
@@ -93,49 +105,34 @@ class CPipeline(Pipeline):
 
     def get_deploy_steps(self, depends_on=[]):
         # baseline data prep
-        make_baseline_sets_step = self.baseliner.get_make_baseline_sets_step(self.role_param, self.target_name_param, self.prediction_name_param, self.build_role_arn, self.target_name_param, depends_on=depends_on)
+        make_baseline_sets_step = self.baseliner.get_make_baseline_sets_step(self.role_param, self.target_name_param, self.prediction_name_param, self.lambda_execution_role_arn, self.target_name_param, depends_on=depends_on)
 
-        ###########################
-        ## Realtime Deploy Branch
-        realtime_deploy_steps=self.get_realtime_deploy_steps()
-        
-        ###########################
-        ## Batch Deploy Branch
-        batch_deploy_steps=self.get_batch_deploy_steps()
+        if self.deployment_type == 'realtime':
+            ## Realtime Deploy Branch
+            deploy_steps=self.get_realtime_deploy_steps()
+        else:
+            ## Batch Deploy Branch
+            deploy_steps=self.get_batch_deploy_steps()
 
-        ###########################
-        ## Choice
-        is_realtime = ConditionEquals(left=self.action_param, right='realtime')
-        realtime_or_batch_steps = ConditionStep(name='ActionTypeCheck', conditions=[is_realtime], if_steps=[realtime_deploy_steps], else_steps=[batch_deploy_steps], depends_on=make_baseline_sets_step)
-
-        return [realtime_or_batch_steps]
+        return [make_baseline_sets_step] + deploy_steps
 
     def get_inference_steps(self, depends_on=[]):
+        if self.deployment_type == 'realtime':
+            inference_steps=self.get_realtime_inference_steps()
+        else:    
+            inference_steps=self.get_batch_inference_steps()
 
-        ###########################
-        ## Realtime inference Branch
-        realtime_inference_steps=self.get_realtime_inference_steps()
-        
-        ###########################
-        ## Batch inference Branch
-        batch_inference_steps=self.get_batch_inference_steps()
-
-        ###########################
-        ## Choice
-        is_realtime = ConditionEquals(left=self.action_param, right='realtime')
-        realtime_or_batch_steps = ConditionStep(name='ActionTypeCheck', conditions=[is_realtime], if_steps=[realtime_inference_steps], else_steps=[batch_inference_steps])
-
-        return [realtime_or_batch_steps]
+        return inference_steps
 
     def get_realtime_deploy_steps(self, depends_on=[]):
     
         deploy_endpoint_step=self.get_deploy_endpoint_step(depends_on=depends_on)
-        data_quality_step = self.baseliner.get_data_quality_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
-        model_quality_step = self.baseliner.get_model_quality_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
-        model_bias_step = self.baseliner.get_model_bias_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
-        model_explainability_step = self.baseliner.get_model_explainability_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
+        data_quality_baseline_step = self.baseliner.get_data_quality_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
+        model_quality_baseline_step = self.baseliner.get_model_quality_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
+        model_bias_baseline_step = self.baseliner.get_model_bias_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
+        model_explainability_baseline_step = self.baseliner.get_model_explainability_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
 
-        return [deploy_endpoint_step, data_quality_step, model_quality_step, model_bias_step, model_explainability_step]
+        return [deploy_endpoint_step, data_quality_baseline_step, model_quality_baseline_step, model_bias_baseline_step, model_explainability_baseline_step]
 
     def get_batch_deploy_steps(self, depends_on=[]):
 
@@ -159,7 +156,7 @@ class CPipeline(Pipeline):
             
         deploy_endpoint_lambda = Lambda(
             function_name='DeployEndpoint',
-            execution_role_arn=self.build_role_arn,
+            execution_role_arn=self.lambda_execution_role_arn,
             script='scripts/deploy_endpoint.py',
             handler='deploy_endpoint.handler',
             timeout=600,  # endpoints take time to deploy
@@ -320,7 +317,7 @@ class CPipeline(Pipeline):
         # make create model step
         lambda_function = Lambda(
             function_name='GetModelFromRegistry',
-            execution_role_arn=self.build_role_arn,
+            execution_role_arn=self.lambda_execution_role_arn,
             script='scripts/get_model_from_registry.py',  # path to your file
             handler='get_model_from_registry.handler',    # filename.function_name
             timeout=60,
@@ -462,14 +459,6 @@ class CPipeline(Pipeline):
             assemble_with='Line'
         )
 
-        # transform_step = TransformStep(
-        #     name="TransformStep",
-        #     step_args=transformer.transform(
-        #         data='s3://omm-test-bucket/models/abalone/data/input/test/test_X.csv',
-        #         content_type='text/csv',
-        #         split_type='Line'
-        #     )
-        # )
         transform_step = TransformStep(
             name="TransformStep",
             transformer=transformer,
@@ -534,24 +523,33 @@ class CPipeline(Pipeline):
         pass
 
 
-def create_pipe(name, deployment_type, target_name, target_type, prediction_name, region='us-east-1', build_role_arn='arn:aws:iam::088461143167:role/SageMakerExecutionRole-1'):
+def create_pipe(
+        name, 
+        deployment_type, 
+        target_name, 
+        target_type, 
+        prediction_name, 
+        region_name='us-east-1',
+        lambda_execution_role_arn='arn:aws:iam::088461143167:role/SageMakerExecutionRole-1',
+        other_execution_role_arn='arn:aws:iam::088461143167:role/SageMakerExecutionRole-1'
+    ):
 
-    print('INIT')
-    sagemaker_session = PipelineSession(boto_session=boto3.Session(region_name='us-east-1'))
-
+    sagemaker_session = PipelineSession(boto_session=boto3.Session(region_name=region_name))
+    invoke_steps_role = get_execution_role(sagemaker_session)
+    
     pipeline = CPipeline(
         sagemaker_session, 
-        build_role_arn=build_role_arn,
         name=name,
         deployment_type=deployment_type,
         target_name=target_name,
         target_type=target_type,
-        prediction_name=prediction_name
+        prediction_name=prediction_name,
+        lambda_execution_role_arn=lambda_execution_role_arn,
+        other_execution_role_arn=other_execution_role_arn
     )
-
     pipeline_definition = json.loads(pipeline.definition())
     print(json.dumps(pipeline_definition, indent=2))
-    pipeline.upsert(role_arn=build_role_arn)
+    pipeline.upsert(role_arn=invoke_steps_role)
     
 
 
@@ -615,13 +613,38 @@ def test_main():
 
     exit()
 
-# python3 pipeline/pipeline.py --action deploy --deployment-type realtime --model-package-group-name abalone --model-package-version 1 --pipe-name sagemaker-pipe-template --target-name rings --prediction-name rings_prediction --project-bucket omm-test-bucket --project-path "models/abalone" --monitor-instance-type "ml.m5.large"
-
-# python3 pipeline/pipeline.py --action deploy --deployment-type batch --model-package-group-name abalone --model-package-version 1 --pipe-name sagemaker-pipe-template --target-name rings --prediction-name rings_prediction --project-bucket omm-test-bucket --project-path "models/abalone" --monitor-instance-type "ml.m5.large"
 
 if __name__ == '__main__':
-
+    # python3 pipeline/pipeline.py --action deploy --deployment-type realtime --model-package-group-name abalone --model-package-version 1 --pipe-name sagemaker-pipe-template --target-name rings --prediction-name rings_prediction --project-bucket omm-test-bucket --project-path "models/abalone" --monitor-instance-type "ml.m5.large"
     # parser = argparse.ArgumentParser()
-    # parser.add_argument('--build-role',               type=str, default='arn:aws:iam::088461143167:role/SageMakerExecutionRole-1')
+    # parser.add_argument('--action', type=str, default='deploy')
     # args = parser.parse_args()
-    create_pipe('abalone-pipe', 'realtime', 'rings', 'float', 'rings-prediction', region='us-east-1', build_role_arn='arn:aws:iam::088461143167:role/SageMakerExecutionRole-1')
+    create_pipe(
+        name='abalone-pipe', 
+        deployment_type='realtime', 
+        target_name='rings', 
+        target_type='float', 
+        prediction_name='rings-prediction', 
+        region_name='us-east-1',
+        lambda_execution_role_arn='arn:aws:iam::088461143167:role/SageMakerExecutionRole-1',
+        other_execution_role_arn='arn:aws:iam::088461143167:role/SageMakerExecutionRole-1'
+    )
+
+    # run(
+    #     'abalone-pipe', 
+    #     wait=False, 
+    #     pipeline_parameters=[
+    #         {'Name': 'ModelPackageGroupName', 'Value': 'abalone'},
+    #         {'Name': 'ModelPackageVersion', 'Value': 1},
+    #         {'Name': 'RuntimeRole', 'Value': 'arn:aws:iam::088461143167:role/SageMakerExecutionRole-1'},
+    #         {'Name': 'Action', 'Value': 'deploy'},
+    #         {'Name': 'ProjectBucket', 'Value': 'abalone'},
+    #         {'Name': 'ProjectPath', 'Value': 'abalone'},
+    #         {'Name': 'MonitorInstanceType', 'Value': 'ml.m5.large'},
+    #         {'Name': 'EndpointInstanceType', 'Value': 'ml.m5.large'},
+    #         {'Name': 'TransformInstanceType', 'Value': 'ml.m5.large'},
+    #         {'Name': 'TrainingBucket', 'Value': 'omm-test-bucket'},
+    #         {'Name': 'TrainingDir', 'Value': 'projects/abalone/models/abalone'},
+    #         {'Name': 'PipelineBucket', 'Value': 'omm-test-bucket'},
+    #     ]
+    # )
