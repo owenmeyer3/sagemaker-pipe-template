@@ -24,6 +24,7 @@ class Paths():
         self.baseline_X_file=f'{self.baseline_dir}/baseline_X.csv'
         self.baseline_model_out_file= f'{self.temp_data_dir}/baseline_X.csv.out'
         self.baseline_y_file=f'{self.baseline_dir}/baseline_y.csv'
+        self.temp_data_dir=f'{self.data_dir}/temp'
 
 
         # Batch
@@ -41,6 +42,8 @@ class Paths():
         self.mb_monitor_dir=f'{self.monitors_dir}/model-bias'
         self.me_monitor_dir=f'{self.monitors_dir}/model-explainability'
 
+        
+
 class PathParams():
     def __init__(self, training_bucket_param, training_dir_param, pipeline_bucket_param, name):
         #### TRAIN ####
@@ -54,7 +57,7 @@ class PathParams():
         self.test_dir=        Join(on='/', values=[self.data_dir, 'input/test'])
         self.train_file=      Join(on='/', values=[self.train_dir, 'train.csv'])
         self.validation_file= Join(on='/', values=[self.validation_dir, 'validation.csv'])
-        self.test_file=       Join(on='/', values=[self.test_dir, 'modtest.csvel'])
+        self.test_file=       Join(on='/', values=[self.test_dir, 'modeltest.csv'])
         self.test_X_file=     Join(on='/', values=[self.test_dir, 'test_X.csv'])
         self.test_y_file=     Join(on='/', values=[self.test_dir, 'test_y.csv'])
 

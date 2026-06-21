@@ -29,7 +29,7 @@ class CPipeline(Pipeline):
         target_name, 
         target_type, 
         prediction_name, 
-        model_package_name,
+        model_package_group_name,
         region_name, 
         lambda_execution_role_arn, 
         other_execution_role_arn
@@ -43,7 +43,7 @@ class CPipeline(Pipeline):
         self.target_name=target_name
         self.target_type = target_type
         self.prediction_name_param=prediction_name
-        self.model_package_group_name=model_package_name
+        self.model_package_group_name=model_package_group_name
         self.lambda_execution_role_arn=lambda_execution_role_arn
         self.other_execution_role_arn=other_execution_role_arn
 
@@ -63,24 +63,38 @@ class CPipeline(Pipeline):
         self.environment_param =                            ParameterString( name='Environment',                         default_value='dev', enum_values=['prd', 'dev', 'stg'])
         self.sns_topic_arn_param =                          ParameterString( name='SNSTopicArn',                         default_value='')
         self.sns_notify_param =                             ParameterBool(   name='SNSNotifyBool',                       default_value=False)
-        self.ground_truth_dir_param =                       ParameterString( name='GroundTruthDir',                      default_value=f's3://{pipeline_bucket}/ground-truth/{model_package_name}')
-        self.batch_input_dir_param =                        ParameterString( name='GroundTruthDir',                      default_value=f's3://{pipeline_bucket}/batch_input/{model_package_name}')
-
-        self.paths={
-
-        }
+        self.ground_truth_dir_param =                       ParameterString( name='GroundTruthDir',                      default_value=f's3://{pipeline_bucket}/ground-truth/{model_package_group_name}')
+        self.batch_input_dir_param =                        ParameterString( name='BatchInputDir',                      default_value=f's3://{pipeline_bucket}/batch_input/{model_package_group_name}')
 
 
+        self.pipeline_dir = f's3://{pipeline_bucket}/pipelines/{model_package_group_name}'
+        self.baseline_dir = f'{self.pipeline_dir}/baseline'
+        self.monitors_dir=  f'{self.pipeline_dir}/monitors'
+        self.batch_out_dir=f'{self.pipeline_dir}/batch_out',
+        self.data_capture_dir=f'{self.pipeline_dir}/capture',
+        self.dq_monitor_dir=f'{self.pipeline_dir}/data-quality',
+        self.mq_monitor_dir=f'{self.pipeline_dir}/model-quality',
+        self.mb_monitor_dir=f'{self.pipeline_dir}/model-bias',
+        self.me_monitor_dir=f'{self.pipeline_dir}/model-explainability',
+        # self.paths={
+        #     'pipeline_dir': pipeline_dir,
+        #     'baseline_dir': baseline_dir,
+        #     'monitors_dir': monitors_dir,
+        #     'batch_out_dir': f'{pipeline_dir}/batch_out',
+        #     'data_capture_dir': f'{pipeline_dir}/capture',
+        #     'dq_monitor_dir': f'{pipeline_dir}/data-quality',
+        #     'mq_monitor_dir': f'{pipeline_dir}/model-quality',
+        #     'mb_monitor_dir': f'{pipeline_dir}/model-bias',
+        #     'me_monitor_dir': f'{pipeline_dir}/model-explainability',
+        # }
 
         self.p_params = paths.PathParams(self.training_bucket_param, self.training_dir_param, self.pipeline_bucket_param, self.name)
 
         # GET / CREATE MODEL
-        get_or_create_model_from_registry_step = steps.GetOrCreateModelFromRegistryStep('GetOrCreateModelFromRegistry', build_role_arn, self.model_package_group_name_param, self.model_package_version_param, self.runtime_role_param)
+        get_or_create_model_from_registry_step = steps.GetOrCreateModelFromRegistryStep('GetOrCreateModelFromRegistry', lambda_execution_role_arn, model_package_group_name, self.model_package_version_param)
         self.model_name_param = get_or_create_model_from_registry_step.properties.Outputs['model_name']
         self.model_package_arn_param = get_or_create_model_from_registry_step.properties.Outputs['model_package_arn']
 
-
-        self.baseliner = baseline.Baseliner(self.model_name_param, self.p_params, self.monitor_instance_type_param, self.sagemaker_session)
 
         ###########################
         ## Deploy Branch
@@ -101,6 +115,34 @@ class CPipeline(Pipeline):
         super().__init__(name=self.name, parameters=self.parameters, steps=steps, sagemaker_session=self.sagemaker_session)
 
         ###########################
+
+
+    def get_baseline_steps(self, depends_on=[]):
+        get_or_create_model_from_registry_step = steps.PrepBaselineSetsStep('PrepBaselineSets', self.lambda_execution_role_arn, model_package_group_name, self.model_package_version_param)
+        baseline_X_dir = get_or_create_model_from_registry_step.properties.Outputs['baseline_X_dir']
+        baseline_X_filename = get_or_create_model_from_registry_step.properties.Outputs['baseline_X_filename']
+
+        # transform
+
+        get_baseline_preds_step=steps.GetBaselinePredsStep('GetBaselinePreds', self.lambda_execution_role_arn, transform_out_dir, baseline_X_filename, baseline_pred_file_dest)
+        baseline_pred_file = get_or_create_model_from_registry_step.properties.Outputs['baseline_pred_file']
+
+        make_baseline_sets_step=steps.MakeBaselineSetsStep( 
+            'MakeBaselineSets', 
+            self.lambda_execution_role_arn, 
+            self.target_name,
+            self.prediction_name,
+            self.target_type,
+            self.baseline_file,
+            baseline_pred_file,
+            self.dq_monitor_dir,
+            self.db_monitor_dir,
+            self.mq_monitor_dir,
+            self.mb_monitor_dir,
+            self.me_monitor_dir,
+            self.train_file,
+            self.train_X_file
+        )
 
 
     def get_deploy_steps(self, depends_on=[]):
