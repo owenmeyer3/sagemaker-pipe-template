@@ -61,10 +61,10 @@ class CPipeline(Pipeline):
         self.enable_model_explainability_monitoring_param = ParameterBool(   name='EnableModelExplainabilityMonitoring', default_value=True)
         self.enable_model_quality_monitoring_param =        ParameterBool(   name='EnableModelQualityMonitoring',        default_value=True)
         self.environment_param =                            ParameterString( name='Environment',                         default_value='dev', enum_values=['prd', 'dev', 'stg'])
-        self.sns_topic_arn_param =                          ParameterString( name='SNSTopicArn',                         default_value='')
-        self.sns_notify_param =                             ParameterBool(   name='SNSNotifyBool',                       default_value=False)
+        self.sns_topic_arn_param =                          ParameterString( name='SnsTopicArn',                         default_value='')
+        self.enable_sns_notification_param =                ParameterBool(   name='EnableSnsNotification',               default_value=False)
         self.ground_truth_dir_param =                       ParameterString( name='GroundTruthDir',                      default_value=f's3://{pipeline_bucket}/ground-truth/{model_package_group_name}')
-        self.batch_input_dir_param =                        ParameterString( name='BatchInputDir',                      default_value=f's3://{pipeline_bucket}/batch_input/{model_package_group_name}')
+        self.batch_input_dir_param =                        ParameterString( name='BatchInputDir',                       default_value=f's3://{pipeline_bucket}/batch_input/{model_package_group_name}')
 
 
         self.pipeline_dir = f's3://{pipeline_bucket}/pipelines/{model_package_group_name}'
@@ -95,6 +95,10 @@ class CPipeline(Pipeline):
         self.model_name_param = get_or_create_model_from_registry_step.properties.Outputs['model_name']
         self.model_package_arn_param = get_or_create_model_from_registry_step.properties.Outputs['model_package_arn']
 
+        ###########################
+
+        ## Baseline Branch
+        baseline_steps=self.get_baseline_steps(get_or_create_model_from_registry_step)
 
         ###########################
         ## Deploy Branch
@@ -107,7 +111,51 @@ class CPipeline(Pipeline):
         ###########################
         ## Choice
         is_inference = ConditionEquals(left=self.action_param, right='inference')
-        deploy_or_inference_steps = ConditionStep(name='ActionTypeCheck', conditions=[is_inference], if_steps=[deploy_steps], else_steps=[inference_steps], depends_on=[])
+        is_register_new_baseline = ConditionEquals(left=self.register_new_baseline_param, right=True)
+        is_data_quality_monitoring = ConditionEquals(left=self.enable_data_quality_monitoring_param, right=True)
+        is_model_bias_monitoring = ConditionEquals(left=self.enable_model_bias_monitoring_param, right=True)
+        is_model_explainability_monitoring = ConditionEquals(left=self.enable_model_explainability_monitoring_param, right=True)
+        is_model_quality_monitoring = ConditionEquals(left=self.enable_model_quality_monitoring_param, right=True)
+        is_sns_notification = ConditionEquals(left=self.enable_sns_notification_param, right=True)
+
+
+        deploy_or_inference_steps = ConditionStep(name='ActionTypeChoice', conditions=[is_inference], 
+            if_steps=deploy_steps, 
+            else_steps=inference_steps, 
+            depends_on=baseline_steps
+        )
+
+        baseline_or_not_steps = ConditionStep(name='BaselineChoice', conditions=[is_register_new_baseline], 
+            if_steps=baseline_steps, 
+            else_steps=deploy_or_inference_steps, 
+            depends_on=get_or_create_model_from_registry_step
+        )
+
+        data_quality_or_not_steps = ConditionStep(name='DataQualityChoice', conditions=[is_data_quality_monitoring], 
+            if_steps=[], 
+            else_steps=[], 
+            depends_on=[]
+        )
+        model_bias_or_not_steps = ConditionStep(name='ModelBiasChoice', conditions=[is_model_bias_monitoring], 
+            if_steps=[], 
+            else_steps=[], 
+            depends_on=[]
+        )
+        model_explainability_or_not_steps = ConditionStep(name='ModelExplainabilityChoice', conditions=[is_model_explainability_monitoring], 
+            if_steps=[], 
+            else_steps=[], 
+            depends_on=[]
+        )
+        model_quality_or_not_steps = ConditionStep(name='ModelQualityChoice', conditions=[is_model_quality_monitoring], 
+            if_steps=[], 
+            else_steps=[], 
+            depends_on=[]
+        )
+        sns_notification_or_not_steps = ConditionStep(name='SnsNotificationChoice', conditions=[is_sns_notification], 
+            if_steps=[], 
+            else_steps=[], 
+            depends_on=[]
+        )
 
         ###########################
         ## Full Pipe
@@ -117,14 +165,46 @@ class CPipeline(Pipeline):
         ###########################
 
 
-    def get_baseline_steps(self, depends_on=[]):
-        get_or_create_model_from_registry_step = steps.PrepBaselineSetsStep('PrepBaselineSets', self.lambda_execution_role_arn, model_package_group_name, self.model_package_version_param)
-        baseline_X_dir = get_or_create_model_from_registry_step.properties.Outputs['baseline_X_dir']
-        baseline_X_filename = get_or_create_model_from_registry_step.properties.Outputs['baseline_X_filename']
+    def get_baseline_steps(self, get_or_create_model_from_registry_step):
+
+        prep_baseline_step = steps.PrepBaselineSetsStep(
+            'PrepBaselineSets', 
+            get_or_create_model_from_registry_step.properties.Outputs['model_name'],
+            self.lambda_execution_role_arn,
+            self.baseline_file_param,
+            self.target_name,
+            self.target_type,
+            self.transform_out_dir,
+            self.sagemaker_session,
+            depends_on=[get_or_create_model_from_registry_step]
+        )
+        # baseline_X_dir = prep_baseline_step.properties.Outputs['baseline_X_dir']
+        baseline_X_filename = prep_baseline_step.properties.Outputs['baseline_X_filename']
 
         # transform
+        transform_step = TransformStep(
+            name="TransformStep",
+            transformer=Transformer(
+                model_name=self.model_name,
+                instance_count=1,
+                instance_type=self.transform_instance_type_param,
+                output_path=self.transform_out_dir,
+                accept='text/csv',
+                assemble_with='Line'
+            ),
+            inputs=TransformInput(data=baseline_X_filename, content_type='text/csv', split_type='Line'),
+            depends_on=[prep_baseline_step],
+            sagemaker_session=self.sagemaker_session
+        )
 
-        get_baseline_preds_step=steps.GetBaselinePredsStep('GetBaselinePreds', self.lambda_execution_role_arn, transform_out_dir, baseline_X_filename, baseline_pred_file_dest)
+        get_baseline_preds_step=steps.GetBaselinePredsStep(
+            'GetBaselinePreds', 
+            self.lambda_execution_role_arn, 
+            self.transform_out_dir, 
+            baseline_X_filename, 
+            self.baseline_pred_file_dest, 
+            depends_on=[transform_step]
+        )
         baseline_pred_file = get_or_create_model_from_registry_step.properties.Outputs['baseline_pred_file']
 
         make_baseline_sets_step=steps.MakeBaselineSetsStep( 
@@ -141,34 +221,44 @@ class CPipeline(Pipeline):
             self.mb_monitor_dir,
             self.me_monitor_dir,
             self.train_file,
-            self.train_X_file
+            self.train_X_file,
+            depends_on=[get_baseline_preds_step]
         )
 
+        return make_baseline_sets_step
 
-    def get_deploy_steps(self, depends_on=[]):
+
+    def get_deploy_steps(self, get_or_create_model_from_registry_step):
         # baseline data prep
-        make_baseline_sets_step = self.baseliner.get_make_baseline_sets_step(self.role_param, self.target_name_param, self.prediction_name_param, self.lambda_execution_role_arn, self.target_name_param, depends_on=depends_on)
+        make_baseline_sets_step = self.baseliner.get_make_baseline_sets_step(
+            self.role_param, 
+            self.target_name_param, 
+            self.prediction_name_param, 
+            self.lambda_execution_role_arn, 
+            self.target_name_param, 
+            depends_on=[get_or_create_model_from_registry_step]
+        )
 
         if self.deployment_type == 'realtime':
             ## Realtime Deploy Branch
-            deploy_steps=self.get_realtime_deploy_steps()
+            deploy_steps=self.get_realtime_deploy_steps(get_or_create_model_from_registry_step)
         else:
             ## Batch Deploy Branch
-            deploy_steps=self.get_batch_deploy_steps()
+            deploy_steps=self.get_batch_deploy_steps(get_or_create_model_from_registry_step)
 
         return [make_baseline_sets_step] + deploy_steps
 
-    def get_inference_steps(self, depends_on=[]):
+    def get_inference_steps(self, get_or_create_model_from_registry_step):
         if self.deployment_type == 'realtime':
-            inference_steps=self.get_realtime_inference_steps()
+            inference_steps=self.get_realtime_inference_steps(get_or_create_model_from_registry_step)
         else:    
-            inference_steps=self.get_batch_inference_steps()
+            inference_steps=self.get_batch_inference_steps(get_or_create_model_from_registry_step)
 
         return inference_steps
 
-    def get_realtime_deploy_steps(self, depends_on=[]):
+    def get_realtime_deploy_steps(self, get_or_create_model_from_registry_step):
     
-        deploy_endpoint_step=self.get_deploy_endpoint_step(depends_on=depends_on)
+        deploy_endpoint_step=self.get_deploy_endpoint_step(depends_on=[get_or_create_model_from_registry_step])
         data_quality_baseline_step = self.baseliner.get_data_quality_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
         model_quality_baseline_step = self.baseliner.get_model_quality_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
         model_bias_baseline_step = self.baseliner.get_model_bias_baseline_step(self.role_param.default_value, depends_on=[deploy_endpoint_step])
@@ -176,9 +266,9 @@ class CPipeline(Pipeline):
 
         return [deploy_endpoint_step, data_quality_baseline_step, model_quality_baseline_step, model_bias_baseline_step, model_explainability_baseline_step]
 
-    def get_batch_deploy_steps(self, depends_on=[]):
+    def get_batch_deploy_steps(self, get_or_create_model_from_registry_step):
 
-        batch_transform_step=self.get_batch_transform_step(self.p.baseline_X_file, depends_on=depends_on)
+        batch_transform_step=self.get_batch_transform_step(self.p.baseline_X_file, depends_on=[get_or_create_model_from_registry_step])
         data_quality_step = self.baseliner.get_data_quality_baseline_step(self.role_param.default_value, depends_on=[batch_transform_step])
         model_quality_step = self.baseliner.get_model_quality_baseline_step(self.role_param.default_value, depends_on=[batch_transform_step])
         model_bias_step = self.baseliner.get_model_bias_baseline_step(self.role_param.default_value, depends_on=[batch_transform_step])
@@ -187,11 +277,11 @@ class CPipeline(Pipeline):
         return [batch_transform_step, data_quality_step, model_quality_step, model_bias_step, model_explainability_step]
 
 
-    def get_realtime_inference_steps(self, depends_on=[]):
+    def get_realtime_inference_steps(self, get_or_create_model_from_registry_step):
         return []
 
 
-    def get_batch_inference_steps(self, depends_on=[]):
+    def get_batch_inference_steps(self, get_or_create_model_from_registry_step):
         return []
     
     def get_deploy_endpoint_step(self, depends_on=[]):

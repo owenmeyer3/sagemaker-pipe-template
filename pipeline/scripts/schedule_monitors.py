@@ -45,17 +45,21 @@ def delete_monitor(sm_client, endpoint_name, monitoring_type): # 'DataQuality':|
 ##############################################
 ############### JOB DEFINITIONS ##############
 ##############################################
+
 def create_data_quality_job_definition(        
     sm_client, 
-    role, 
     name, 
-    deploy_type, 
-    monitor_dir, 
-    vpc_config=None,
+    role_arn,
+    deploy_type,
+    monitor_dir,
+    image_uri="156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+    instance_count=1, 
+    instance_type='ml.m5.large', 
+    volume_size_in_gb=20, 
+    max_runtime_in_seconds=1800,  
+    dataset_format={'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
     endpoint_name=None, 
-    data_cature_dir=None, 
-    instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
-    dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
+    data_cature_dir=None
     ):
     if deploy_type == 'realtime':
         job_input={
@@ -99,7 +103,7 @@ def create_data_quality_job_definition(
             "StatisticsResource": {"S3Uri": f'{monitor_dir}/info/statistics.json'}
         },
         DataQualityAppSpecification={
-            'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer"#,
+            'ImageUri': image_uri#,
             # 'ContainerEntrypoint': ['string',],
             # 'ContainerArguments': ['string',],
             # 'RecordPreprocessorSourceUri': 'string',
@@ -121,7 +125,7 @@ def create_data_quality_job_definition(
         },
         JobResources={
             'ClusterConfig': {
-                'InstanceCount': 1,
+                'InstanceCount': instance_count,
                 'InstanceType': instance_type,
                 'VolumeSizeInGB': volume_size_in_gb#,
                 # 'VolumeKmsKeyId': 'string'
@@ -130,9 +134,9 @@ def create_data_quality_job_definition(
         NetworkConfig={
             # 'EnableInterContainerTrafficEncryption': True|False,
             # 'EnableNetworkIsolation': True|False,
-            'VpcConfig': vpc_config
+            # 'VpcConfig': vpc_config
         },
-        RoleArn=role,
+        RoleArn=role_arn,
         StoppingCondition={
             'MaxRuntimeInSeconds': max_runtime_in_seconds
         },
@@ -144,16 +148,19 @@ def create_data_quality_job_definition(
 
 def create_model_bias_job_definition(        
     sm_client, 
-    role, 
     name, 
-    deploy_type, 
-    monitor_dir, 
+    role_arn,
+    deploy_type,
+    monitor_dir,
     ground_truth_dir,
-    vpc_config=None,
+    image_uri="156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+    instance_count=1, 
+    instance_type='ml.m5.large', 
+    volume_size_in_gb=20, 
+    max_runtime_in_seconds=1800,  
+    dataset_format={'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
     endpoint_name=None, 
-    data_cature_dir=None, 
-    instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
-    dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
+    data_cature_dir=None
     ):
     if deploy_type == 'realtime':
         job_input={
@@ -197,7 +204,7 @@ def create_model_bias_job_definition(
             "ConstraintsResource": {"S3Uri": f'{monitor_dir}/info/constraints.json'}
         },
         ModelBiasAppSpecification={
-            'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+            'ImageUri': image_uri,
             'ConfigUri': f'{monitor_dir}/check_output',
             # 'Environment': {'string': 'string'}
         },
@@ -216,7 +223,7 @@ def create_model_bias_job_definition(
         },
         JobResources={
             'ClusterConfig': {
-                'InstanceCount': 1,
+                'InstanceCount': instance_count,
                 'InstanceType': instance_type,
                 'VolumeSizeInGB': volume_size_in_gb#,
                 # 'VolumeKmsKeyId': 'string'
@@ -225,9 +232,9 @@ def create_model_bias_job_definition(
         NetworkConfig={
             # 'EnableInterContainerTrafficEncryption': True|False,
             # 'EnableNetworkIsolation': True|False,
-            'VpcConfig': vpc_config
+            # 'VpcConfig': vpc_config
         },
-        RoleArn=role,
+        RoleArn=role_arn,
         StoppingCondition={
             'MaxRuntimeInSeconds': max_runtime_in_seconds
         },
@@ -237,18 +244,20 @@ def create_model_bias_job_definition(
     return response
 
 
-
 def create_model_explainability_job_definition(        
     sm_client, 
-    role, 
     name, 
-    deploy_type, 
+    role_arn,
+    deploy_type,
     monitor_dir,
-    vpc_config=None,
+    image_uri="156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+    instance_count=1, 
+    instance_type='ml.m5.large', 
+    volume_size_in_gb=20, 
+    max_runtime_in_seconds=1800,  
+    dataset_format={'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
     endpoint_name=None, 
-    data_cature_dir=None, 
-    instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
-    dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
+    data_cature_dir=None
     ):
     if deploy_type == 'realtime':
         job_input={
@@ -291,7 +300,7 @@ def create_model_explainability_job_definition(
             "ConstraintsResource": {"S3Uri": f'{monitor_dir}/info/constraints.json'}
         },
         ModelExplainabilityAppSpecification={
-            'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+            'ImageUri': image_uri,
             'ConfigUri': f'{monitor_dir}/check_output',
             # 'Environment': {'string': 'string'}
         },
@@ -310,7 +319,7 @@ def create_model_explainability_job_definition(
         },
         JobResources={
             'ClusterConfig': {
-                'InstanceCount': 1,
+                'InstanceCount': instance_count,
                 'InstanceType': instance_type,
                 'VolumeSizeInGB': volume_size_in_gb#,
                 # 'VolumeKmsKeyId': 'string'
@@ -319,9 +328,9 @@ def create_model_explainability_job_definition(
         NetworkConfig={
             # 'EnableInterContainerTrafficEncryption': True|False,
             # 'EnableNetworkIsolation': True|False,
-            'VpcConfig': vpc_config
+            # 'VpcConfig': vpc_config
         },
-        RoleArn=role,
+        RoleArn=role_arn,
         StoppingCondition={
             'MaxRuntimeInSeconds': max_runtime_in_seconds
         },
@@ -331,21 +340,23 @@ def create_model_explainability_job_definition(
     return response
 
 
-
 def create_model_quality_job_definition(        
     sm_client, 
-    role, 
     name, 
-    deploy_type, 
-    problem_type,
+    role_arn,
+    deploy_type,
+    monitor_dir,
     ground_truth_label,
-    monitor_dir, 
     ground_truth_dir,
-    vpc_config=None,
+    problem_type,
+    image_uri="156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+    instance_count=1, 
+    instance_type='ml.m5.large', 
+    volume_size_in_gb=20, 
+    max_runtime_in_seconds=1800,  
+    dataset_format={'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
     endpoint_name=None, 
-    data_cature_dir=None, 
-    instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
-    dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
+    data_cature_dir=None
 ):
     if deploy_type == 'realtime':
         job_input={
@@ -389,7 +400,7 @@ def create_model_quality_job_definition(
             "ConstraintsResource": {"S3Uri": f'{monitor_dir}/info/constraints.json'}
         },
         ModelQualityAppSpecification={
-            'ImageUri': "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+            'ImageUri': image_uri,
             'ProblemType': problem_type,
             # 'ContainerEntrypoint': ['string',],
             # 'ContainerArguments': ['string',],
@@ -412,7 +423,7 @@ def create_model_quality_job_definition(
         },
         JobResources={
             'ClusterConfig': {
-                'InstanceCount': 1,
+                'InstanceCount': instance_count,
                 'InstanceType': instance_type,
                 'VolumeSizeInGB': volume_size_in_gb#,
                 # 'VolumeKmsKeyId': 'string'
@@ -421,9 +432,9 @@ def create_model_quality_job_definition(
         NetworkConfig={
             # 'EnableInterContainerTrafficEncryption': True|False,
             # 'EnableNetworkIsolation': True|False,
-            'VpcConfig': vpc_config
+            # 'VpcConfig': vpc_config
         },
-        RoleArn=role,
+        RoleArn=role_arn,
         StoppingCondition={
             'MaxRuntimeInSeconds': max_runtime_in_seconds
         },
@@ -439,13 +450,18 @@ def create_model_quality_job_definition(
 def create_data_quality_monitoring_schedule(
     sm_client, 
     name,
-    role,
+    role_arn,
     deploy_type,
     monitor_dir,
-    schedule_expression, 
-    data_analysis_start_time, 
-    data_analysis_end_time,
-    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']},
+    image_uri="156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+    instance_count=1,
+    instance_type='ml.m5.large', 
+    volume_size_in_gb=20, 
+    max_runtime_in_seconds=1800,
+    dataset_format={'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}} 
+    schedule_expression='cron(0 * ? * * *)', 
+    data_analysis_start_time="-PT2H", 
+    data_analysis_end_time="-PT1H",
     endpoint_name=None, 
     data_cature_dir=None
 ):
@@ -454,15 +470,18 @@ def create_data_quality_monitoring_schedule(
 
     response = create_data_quality_job_definition(        
         sm_client, 
-        role, 
-        job_definition_name, 
+        job_definition_name,
+        role_arn, 
         deploy_type, 
         monitor_dir, 
-        vpc_config=vpc_config,
+        image_uri,
+        instance_count=instance_count,
+        instance_type=instance_type, 
+        volume_size_in_gb=volume_size_in_gb, 
+        max_runtime_in_seconds=max_runtime_in_seconds,
+        dataset_format=dataset_format,
         endpoint_name=endpoint_name, 
         data_cature_dir=data_cature_dir, 
-        instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
-        dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
     )
 
     response = sm_client.create_monitoring_schedule(
@@ -484,32 +503,39 @@ def create_data_quality_monitoring_schedule(
 def create_model_bias_monitoring_schedule(
     sm_client, 
     name,
-    role,
+    role_arn,
     deploy_type,
     monitor_dir,
     ground_truth_dir,
-    schedule_expression, 
-    data_analysis_start_time, 
-    data_analysis_end_time,
-    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']},
+    image_uri="156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+    instance_count=1,
+    instance_type='ml.m5.large', 
+    volume_size_in_gb=20, 
+    max_runtime_in_seconds=1800,
+    dataset_format={'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}} 
+    schedule_expression='cron(0 * ? * * *)', 
+    data_analysis_start_time="-PT2H", 
+    data_analysis_end_time="-PT1H",
     endpoint_name=None, 
     data_cature_dir=None
 ):
-
     job_definition_name = f'{name}-job'
 
     response = create_model_bias_job_definition(        
         sm_client, 
-        role, 
-        job_definition_name, 
+        job_definition_name,
+        role_arn,
         deploy_type, 
         monitor_dir, 
         ground_truth_dir,
-        vpc_config=vpc_config,
+        image_uri=image_uri,
+        instance_count=instance_count, 
+        instance_type=instance_type, 
+        volume_size_in_gb=volume_size_in_gb, 
+        max_runtime_in_seconds=max_runtime_in_seconds,
+        dataset_format=dataset_format,
         endpoint_name=endpoint_name, 
         data_cature_dir=data_cature_dir, 
-        instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
-        dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
     )
 
     response = sm_client.create_monitoring_schedule(
@@ -531,13 +557,18 @@ def create_model_bias_monitoring_schedule(
 def create_model_explainability_monitoring_schedule(
     sm_client, 
     name,
-    role,
+    role_arn,
     deploy_type,
     monitor_dir,
-    schedule_expression, 
-    data_analysis_start_time, 
-    data_analysis_end_time,
-    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']},
+    image_uri="156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+    instance_count=1,
+    instance_type='ml.m5.large', 
+    volume_size_in_gb=20, 
+    max_runtime_in_seconds=1800,
+    dataset_format={'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}} 
+    schedule_expression='cron(0 * ? * * *)', 
+    data_analysis_start_time="-PT2H", 
+    data_analysis_end_time="-PT1H",
     endpoint_name=None, 
     data_cature_dir=None
 ):
@@ -546,15 +577,18 @@ def create_model_explainability_monitoring_schedule(
 
     response = create_model_explainability_job_definition(        
         sm_client, 
-        role, 
-        job_definition_name, 
+        job_definition_name,
+        role_arn, 
         deploy_type, 
         monitor_dir, 
-        vpc_config=vpc_config,
+        image_uri=image_uri,
+        instance_count=instance_count, 
+        instance_type=instance_type, 
+        volume_size_in_gb=volume_size_in_gb, 
+        max_runtime_in_seconds=max_runtime_in_seconds,  
+        dataset_format=dataset_format,
         endpoint_name=endpoint_name, 
-        data_cature_dir=data_cature_dir, 
-        instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
-        dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
+        data_cature_dir=data_cature_dir
     )
 
     response = sm_client.create_monitoring_schedule(
@@ -572,19 +606,25 @@ def create_model_explainability_monitoring_schedule(
     )
     return response
 
+
 def create_model_quality_monitoring_schedule(
     sm_client, 
     name,
-    role,
+    role_arn,
     deploy_type,
     problem_type, # 'BinaryClassification'|'MulticlassClassification'|'Regression'
     ground_truth_label,
     monitor_dir,
     ground_truth_dir,
-    schedule_expression, 
-    data_analysis_start_time, 
-    data_analysis_end_time,
-    vpc_config={'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']},
+    image_uri="156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
+    instance_count=1,
+    instance_type='ml.m5.large', 
+    volume_size_in_gb=20, 
+    max_runtime_in_seconds=1800,
+    dataset_format={'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}} 
+    schedule_expression='cron(0 * ? * * *)', 
+    data_analysis_start_time="-PT2H", 
+    data_analysis_end_time="-PT1H",
     endpoint_name=None, 
     data_cature_dir=None
 ):
@@ -593,18 +633,21 @@ def create_model_quality_monitoring_schedule(
 
     response = create_model_quality_job_definition(        
         sm_client, 
-        role, 
         job_definition_name, 
+        role_arn,
         deploy_type, 
-        problem_type,
-        ground_truth_label,
         monitor_dir, 
+        ground_truth_label,
         ground_truth_dir,
-        vpc_config=vpc_config,
+        problem_type,
+        image_uri=image_uri,
+        instance_count=instance_count, 
+        instance_type=instance_type, 
+        volume_size_in_gb=volume_size_in_gb, 
+        max_runtime_in_seconds=max_runtime_in_seconds,  
+        dataset_format=dataset_format,
         endpoint_name=endpoint_name, 
-        data_cature_dir=data_cature_dir, 
-        instance_type='ml.m5.large', volume_size_in_gb=20, max_runtime_in_seconds=1800,  
-        dataset_format={'Csv': {'Header': True}} # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}}
+        data_cature_dir=data_cature_dir
     )
 
     response = sm_client.create_monitoring_schedule(
@@ -629,13 +672,18 @@ def data_quality_handler(event, context):
     endpoint_name = event['endpoint_name'] if 'endpoint_name' in event else None
     data_cature_dir = event['data_cature_dir'] if 'data_cature_dir' in event else None
     name = event['name']
-    role = event['role']
+    role_arn = event['monitor_role']
     deploy_type = event['deploy_type']
     monitor_dir = event['monitor_dir']
-    schedule_expression = event['schedule_expression']
-    data_analysis_start_time = event['data_analysis_start_time']
-    data_analysis_end_time = event['data_analysis_end_time']
-    vpc_config = event['vpc_config'] # {'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+    image_uri = event['image_uri'] if 'image_uri' in event else "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer"
+    instance_count = event['instance_count'] if 'instance_count' in event else 1
+    instance_type = event['instance_type'] if 'instance_type' in event else 'ml.m5.large'
+    volume_size_in_gb = event['volume_size_in_gb'] if 'volume_size_in_gb' in event else 20
+    max_runtime_in_seconds = event['max_runtime_in_seconds'] if 'max_runtime_in_seconds' in event else 1800
+    dataset_format = event['dataset_format'] if 'dataset_format' in event else {'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}} 
+    schedule_expression = event['schedule_expression'] if 'schedule_expression' in event else 'cron(0 * ? * * *)'
+    data_analysis_start_time = event['data_analysis_start_time'] if 'data_analysis_start_time' in event else "-PT2H"
+    data_analysis_end_time = event['data_analysis_end_time'] if 'data_analysis_end_time' in event else "-PT1H"
 
     sm_client = boto3.client('sagemaker')
     delete_monitor(sm_client, endpoint_name, monitoring_type)
@@ -644,17 +692,23 @@ def data_quality_handler(event, context):
     result = create_data_quality_monitoring_schedule(
         sm_client, 
         name,
-        role,
+        role_arn,
         deploy_type,
         monitor_dir,
-        schedule_expression, 
-        data_analysis_start_time, 
-        data_analysis_end_time,
-        vpc_config=vpc_config,
+        image_uri=image_uri,
+        instance_count=instance_count,
+        instance_type=instance_type, 
+        volume_size_in_gb=volume_size_in_gb, 
+        max_runtime_in_seconds=max_runtime_in_seconds,
+        dataset_format=dataset_format, 
+        schedule_expression=schedule_expression, 
+        data_analysis_start_time=data_analysis_start_time, 
+        data_analysis_end_time=data_analysis_end_time,
         endpoint_name=endpoint_name, 
         data_cature_dir=data_cature_dir
     )
     return {'result': result}
+
 
 def model_bias_handler(event, context):
     monitoring_type='ModelBias'
@@ -662,14 +716,18 @@ def model_bias_handler(event, context):
     endpoint_name = event['endpoint_name'] if 'endpoint_name' in event else None
     data_cature_dir = event['data_cature_dir'] if 'data_cature_dir' in event else None
     name = event['name']
-    role = event['role']
     deploy_type = event['deploy_type']
     monitor_dir = event['monitor_dir']
     ground_truth_dir = event['ground_truth_dir']
-    schedule_expression = event['schedule_expression']
-    data_analysis_start_time = event['data_analysis_start_time']
-    data_analysis_end_time = event['data_analysis_end_time']
-    vpc_config = event['vpc_config'] # {'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+    image_uri = event['image_uri'] if 'image_uri' in event else "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer"
+    instance_count = event['instance_count'] if 'instance_count' in event else 1
+    instance_type = event['instance_type'] if 'instance_type' in event else 'ml.m5.large'
+    volume_size_in_gb = event['volume_size_in_gb'] if 'volume_size_in_gb' in event else 20
+    max_runtime_in_seconds = event['max_runtime_in_seconds'] if 'max_runtime_in_seconds' in event else 1800
+    dataset_format = event['dataset_format'] if 'dataset_format' in event else {'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}} 
+    schedule_expression = event['schedule_expression'] if 'schedule_expression' in event else 'cron(0 * ? * * *)'
+    data_analysis_start_time = event['data_analysis_start_time'] if 'data_analysis_start_time' in event else "-PT2H"
+    data_analysis_end_time = event['data_analysis_end_time'] if 'data_analysis_end_time' in event else "-PT1H"
 
     sm_client = boto3.client('sagemaker')
     delete_monitor(sm_client, endpoint_name, monitoring_type)
@@ -678,18 +736,23 @@ def model_bias_handler(event, context):
     result = create_model_bias_monitoring_schedule(
         sm_client, 
         name,
-        role,
         deploy_type,
         monitor_dir,
         ground_truth_dir,
-        schedule_expression, 
-        data_analysis_start_time, 
-        data_analysis_end_time,
-        vpc_config=vpc_config,
+        image_uri=image_uri,
+        instance_count=instance_count,
+        instance_type=instance_type, 
+        volume_size_in_gb=volume_size_in_gb, 
+        max_runtime_in_seconds=max_runtime_in_seconds,
+        dataset_format=dataset_format, 
+        schedule_expression=schedule_expression, 
+        data_analysis_start_time=data_analysis_start_time, 
+        data_analysis_end_time=data_analysis_end_time,
         endpoint_name=endpoint_name, 
         data_cature_dir=data_cature_dir
     )
     return {'result': result}
+
 
 def model_explainability_handler(event, context):
     monitoring_type='ModelExplainability'
@@ -697,13 +760,17 @@ def model_explainability_handler(event, context):
     endpoint_name = event['endpoint_name'] if 'endpoint_name' in event else None
     data_cature_dir = event['data_cature_dir'] if 'data_cature_dir' in event else None
     name = event['name']
-    role = event['role']
     deploy_type = event['deploy_type']
     monitor_dir = event['monitor_dir']
-    schedule_expression = event['schedule_expression']
-    data_analysis_start_time = event['data_analysis_start_time']
-    data_analysis_end_time = event['data_analysis_end_time']
-    vpc_config = event['vpc_config'] # {'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+    image_uri = event['image_uri'] if 'image_uri' in event else "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer"
+    instance_count = event['instance_count'] if 'instance_count' in event else 1
+    instance_type = event['instance_type'] if 'instance_type' in event else 'ml.m5.large'
+    volume_size_in_gb = event['volume_size_in_gb'] if 'volume_size_in_gb' in event else 20
+    max_runtime_in_seconds = event['max_runtime_in_seconds'] if 'max_runtime_in_seconds' in event else 1800
+    dataset_format = event['dataset_format'] if 'dataset_format' in event else {'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}} 
+    schedule_expression = event['schedule_expression'] if 'schedule_expression' in event else 'cron(0 * ? * * *)'
+    data_analysis_start_time = event['data_analysis_start_time'] if 'data_analysis_start_time' in event else "-PT2H"
+    data_analysis_end_time = event['data_analysis_end_time'] if 'data_analysis_end_time' in event else "-PT1H"
     
     sm_client = boto3.client('sagemaker')
     delete_monitor(sm_client, endpoint_name, monitoring_type)
@@ -712,17 +779,22 @@ def model_explainability_handler(event, context):
     result = create_model_explainability_monitoring_schedule(
         sm_client, 
         name,
-        role,
         deploy_type,
         monitor_dir,
-        schedule_expression, 
-        data_analysis_start_time, 
-        data_analysis_end_time,
-        vpc_config=vpc_config,
+        image_uri=image_uri,
+        instance_count=instance_count,
+        instance_type=instance_type, 
+        volume_size_in_gb=volume_size_in_gb, 
+        max_runtime_in_seconds=max_runtime_in_seconds,
+        dataset_format=dataset_format, 
+        schedule_expression=schedule_expression, 
+        data_analysis_start_time=data_analysis_start_time, 
+        data_analysis_end_time=data_analysis_end_time,
         endpoint_name=endpoint_name, 
         data_cature_dir=data_cature_dir
     )
     return {'result': result}
+
 
 def model_quality_handler(event, context):
     monitoring_type='ModelQuality'
@@ -730,16 +802,20 @@ def model_quality_handler(event, context):
     endpoint_name = event['endpoint_name'] if 'endpoint_name' in event else None
     data_cature_dir = event['data_cature_dir'] if 'data_cature_dir' in event else None
     name = event['name']
-    role = event['role']
     deploy_type = event['deploy_type']
     problem_type = event['problem_type'] # 'BinaryClassification'|'MulticlassClassification'|'Regression'
     ground_truth_label = event['ground_truth_label']
     monitor_dir = event['monitor_dir']
     ground_truth_dir = event['ground_truth_dir']
-    schedule_expression = event['schedule_expression']
-    data_analysis_start_time = event['data_analysis_start_time']
-    data_analysis_end_time = event['data_analysis_end_time']
-    vpc_config = event['vpc_config'] # {'SecurityGroupIds': ['subnet-001be661bcef4b615','subnet-003ad32933ca43e74'],'Subnets': ['sg-63ef435d']}
+    image_uri = event['image_uri'] if 'image_uri' in event else "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer"
+    instance_count = event['instance_count'] if 'instance_count' in event else 1
+    instance_type = event['instance_type'] if 'instance_type' in event else 'ml.m5.large'
+    volume_size_in_gb = event['volume_size_in_gb'] if 'volume_size_in_gb' in event else 20
+    max_runtime_in_seconds = event['max_runtime_in_seconds'] if 'max_runtime_in_seconds' in event else 1800
+    dataset_format = event['dataset_format'] if 'dataset_format' in event else {'Csv': {'Header': True}}, # {'Csv':{'Header': True|False},'Json': {'Line': True|False}, Parquet': {}} 
+    schedule_expression = event['schedule_expression'] if 'schedule_expression' in event else 'cron(0 * ? * * *)'
+    data_analysis_start_time = event['data_analysis_start_time'] if 'data_analysis_start_time' in event else "-PT2H"
+    data_analysis_end_time = event['data_analysis_end_time'] if 'data_analysis_end_time' in event else "-PT1H"
 
     sm_client = boto3.client('sagemaker')
     delete_monitor(sm_client, endpoint_name, monitoring_type)
@@ -748,16 +824,20 @@ def model_quality_handler(event, context):
     result = create_model_quality_monitoring_schedule(
         sm_client, 
         name,
-        role,
         deploy_type,
         problem_type,
         ground_truth_label,
         monitor_dir,
         ground_truth_dir,
-        schedule_expression, 
-        data_analysis_start_time, 
-        data_analysis_end_time,
-        vpc_config=vpc_config,
+        image_uri=image_uri,
+        instance_count=instance_count,
+        instance_type=instance_type, 
+        volume_size_in_gb=volume_size_in_gb, 
+        max_runtime_in_seconds=max_runtime_in_seconds,
+        dataset_format=dataset_format, 
+        schedule_expression=schedule_expression, 
+        data_analysis_start_time=data_analysis_start_time, 
+        data_analysis_end_time=data_analysis_end_time,
         endpoint_name=endpoint_name, 
         data_cature_dir=data_cature_dir
     )
