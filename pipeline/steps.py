@@ -217,8 +217,7 @@ class MakeBaselineSetsStep(LambdaStepBase):
             'mq_monitor_dir':mq_monitor_dir,
             'mb_monitor_dir':mb_monitor_dir,
             'me_monitor_dir':me_monitor_dir,
-            'train_file':train_file,
-            'train_X_file':train_X_file
+            'baseline_X_file':train_X_file
         }
 
         outputs=[]

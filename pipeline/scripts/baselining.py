@@ -29,8 +29,7 @@ def make_baseline_sets(
     me_monitor_dir,
     target_name,
     prediction_name,
-    train_file,
-    train_X_file,
+    baseline_X_file,
     target_type=float
 ):
 
@@ -48,7 +47,6 @@ def make_baseline_sets(
         index=False, 
         header=True
     )
-    # baseline_full.drop(columns=[target_name, prediction_name]).to_csv(f'{dq_monitor_dir}/baseline.csv', index=False, header=True)
 
     # Data Bias → input features + target
     df_to_s3(
@@ -57,7 +55,6 @@ def make_baseline_sets(
         index=False, 
         header=True
     )
-    # baseline_full.drop(columns=[prediction_name]).to_csv(f'{db_monitor_dir}/baseline.csv', index=False, header=True)
 
     # Model Quality → predictions + ground truth labels
     df_to_s3(
@@ -66,7 +63,6 @@ def make_baseline_sets(
         index=False, 
         header=True
     )
-    # baseline_full[[target_name, prediction_name]].to_csv(f'{mq_monitor_dir}/baseline.csv', index=False, header=True)
 
     # Model Bias → features + predictions + labels
     df_to_s3(
@@ -75,7 +71,6 @@ def make_baseline_sets(
         index=False, 
         header=True
     )
-    # baseline_full.to_csv(f'{mb_monitor_dir}/baseline.csv', index=False, header=True)
 
     # Model Explainability → input features + predictions (uses SHAP values)
     df_to_s3(
@@ -84,19 +79,14 @@ def make_baseline_sets(
         index=False, 
         header=True
     )
-    # baseline_full.drop(columns=[target_name]).to_csv(f'{me_monitor_dir}/baseline.csv', index=False, header=True)
 
-    #
-    train=pd.read_csv(train_file, header=None)
-    train_X = train.iloc[:, 1:]
-
+    # baseline_X_file for SHAP
     df_to_s3(
-        train_X, 
-        train_X_file, 
+        baseline_full.drop(columns=[target_name, prediction_name]),
+        baseline_X_file, 
         index=False, 
         header=False
     )
-    # train_X.to_csv(train_X_file, index=False, header=False)
 
     return None
 
@@ -148,8 +138,7 @@ def make_baseline_sets_handler(event, context):
     me_monitor_dir = event['me_monitor_dir']
     target_name = event['target_name']
     prediction_name = event['prediction_name']
-    train_file = event['train_file']
-    train_X_file = event['train_X_file']
+    baseline_X_file = event['baseline_X_file']
     target_type = event['target_type'] if 'target_type' in event else float
 
     result = make_baseline_sets(
@@ -162,9 +151,8 @@ def make_baseline_sets_handler(event, context):
         me_monitor_dir,
         target_name,
         prediction_name,
-        train_file,
-        train_X_file,
+        baseline_X_file,
         target_type=target_type
     )
     
-    return {'result': result}
+    return {}
