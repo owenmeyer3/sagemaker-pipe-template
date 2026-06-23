@@ -101,10 +101,12 @@ def prep_baseline_sets_handler(event, context):
     baseline=pd.read_csv(baseline_file, header=0) # baseline file == validation file
     baseline[target_name] = baseline[target_name].astype(target_type)
     baseline_X = baseline.drop(columns=[target_name])
-    baseline_X.to_csv(f'{baseline_X_file_dest_dir}/baseline_X.csv', index=False, header=False)
+    baseline_X_file=f'{baseline_X_file_dest_dir}/baseline_X.csv'
+    baseline_X.to_csv(baseline_X_file, index=False, header=False)
 
     return {
         'baseline_X_dir': baseline_X_file_dest_dir,
+        'baseline_X_file':baseline_X_file,
         'baseline_X_filename': 'baseline_X.csv'
     }
 

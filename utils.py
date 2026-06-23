@@ -1,6 +1,8 @@
 import pandas as pd
-import sqlalchemy, json, datetime, botocore, time
+import sqlalchemy, json, datetime, botocore, time, json, boto3
 from sklearn.model_selection import train_test_split
+import networkx as nx
+import matplotlib.pyplot as plt
 
 ### SQL
 class Sql(object):
@@ -50,29 +52,19 @@ def view_model_versions(boto_session):
     CreationTimes=[]
     ModelPackageStati=[]
     ModelApprovalStati=[]
-    ModelRegistrationType=[]
-
-#     {'ModelPackageGroupName': 'abalone',
-#   'ModelPackageVersion': 3,
-#   'ModelPackageArn': 'arn:aws:sagemaker:us-east-1:088461143167:model-package/abalone/3',
-#   'CreationTime': datetime.datetime(2026, 6, 15, 16, 13, 15, 518000, tzinfo=tzlocal()),
-#   'ModelPackageStatus': 'Completed',
-#   'ModelPackageRegistrationType': 'Registered'}
-    
 
     for g in groups['ModelPackageGroupSummaryList']:
         group_name=g['ModelPackageGroupName']
         versions = sm_client.list_model_packages(ModelPackageGroupName=group_name)
 
         for v in versions['ModelPackageSummaryList']:
-            ModelPackageGroupNames.append(v['ModelPackageGroupName']) if 'ModelPackageGroupName' in v else ModelPackageGroupNames.append('')
-            ModelPackageVersions.append(v['ModelPackageVersion']) if 'ModelPackageVersion' in v else ModelPackageVersions.append('')
-            ModelPackageGroupArns.append(v['ModelPackageArn']) if 'ModelPackageArn' in v else ModelPackageGroupArns.append('')
-            ModelPackageDescriptions.append(v['ModelPackageDescription']) if 'ModelPackageDescription' in v else ModelPackageDescriptions.append('')
-            CreationTimes.append(v['CreationTime']) if 'CreationTime' in v else CreationTimes.append('')
-            ModelPackageStati.append(v['ModelPackageStatus']) if 'ModelPackageStatus' in v else ModelPackageStati.append('')
-            ModelApprovalStati.append(v['ModelApprovalStatus']) if 'ModelApprovalStatus' in v else ModelApprovalStati.append('')
-            ModelRegistrationType.append(v['ModelPackageRegistrationType']) if 'ModelPackageRegistrationType' in v else ModelRegistrationType.append('')
+            ModelPackageGroupNames.append(v['ModelPackageGroupName'])
+            ModelPackageVersions.append(v['ModelPackageVersion'])
+            ModelPackageGroupArns.append(v['ModelPackageArn'])
+            ModelPackageDescriptions.append(v['ModelPackageDescription'])
+            CreationTimes.append(v['CreationTime'])
+            ModelPackageStati.append(v['ModelPackageStatus'])
+            ModelApprovalStati.append(v['ModelApprovalStatus'])
 
     df_dict={
         'ModelPackageGroupName':ModelPackageGroupNames, 
@@ -81,8 +73,7 @@ def view_model_versions(boto_session):
         'ModelPackageDescription':ModelPackageDescriptions, 
         'CreationTime':CreationTimes, 
         'ModelPackageStatus':ModelPackageStati,  
-        'ModelApprovalStatus':ModelApprovalStati,
-        'ModelPackageRegistrationType':ModelRegistrationType
+        'ModelApprovalStatus':ModelApprovalStati
         }
     return pd.DataFrame(df_dict)
 
@@ -251,34 +242,46 @@ def deploy_or_update_endpoint(boto_session, endpoint_name, endpoint_config_name)
         )
         print(f"Created new endpoint: {endpoint_name}")
 
+def get_model_versions(sm_client, model_package_name, model_package_version):
 
-def create_model_object_from_registry(boto_session, model_package_name, role, model_package_version='latest'):
-    sm_client = boto_session.client('sagemaker')
+    groups = sm_client.list_model_package_groups()
+    for g in groups['ModelPackageGroupSummaryList']:
+        group_name=g['ModelPackageGroupName']
+        versions = sm_client.list_model_packages(ModelPackageGroupName=group_name)
+
+        for v in versions['ModelPackageSummaryList']:
+            if (v['ModelPackageGroupName'] == model_package_name) & (v['ModelPackageVersion'] == model_package_version):
+                return v
+    print('No model_version found in registry')
+    return None
+
+def get_or_create_model_object_from_registry(sm_client, model_package_name, role, model_package_version='latest'):
+
+    model_package_details = sm_client.list_model_packages(
+        ModelPackageGroupName=model_package_name,
+        # ModelApprovalStatus='Approved',
+        SortBy='CreationTime',
+        SortOrder='Descending'
+    )
+    if not model_package_details:
+        print('model package group name does not exist')
+        return
+
     if model_package_version=='latest':
-        model_package_details = sm_client.list_model_packages(
-            ModelPackageGroupName=model_package_name,
-            ModelApprovalStatus='Approved',
-            SortBy='CreationTime',
-            SortOrder='Descending'
-        )
-        if not model_package_details['ModelPackageSummaryList']:
-            raise ValueError("No approved model packages found in registry")
-
         model_package_version = model_package_details['ModelPackageSummaryList'][0]['ModelPackageVersion']
     elif isinstance(model_package_version, str):
         model_package_version=int(model_package_version)
     
-    model_versions_df = view_model_versions(boto_session)
-    model_version_row=model_versions_df[(model_versions_df['ModelPackageGroupName'] == model_package_name) & (model_versions_df['ModelPackageVersion'] == model_package_version)].iloc[0]
-    model_name = model_package_name + '-' + model_version_row['CreationTime'].strftime('%Y-%m-%dT%H-%M-%S')
-    model_package_arn=model_version_row['ModelPackageArn']
-    if model_version_row['ModelApprovalStatus'] != 'Approved':
-        pass
+    model_version = get_model_versions(sm_client, model_package_name, model_package_version)
+    model_package_arn=model_version['ModelPackageArn']
+    if model_version['ModelApprovalStatus'] != 'Approved':
+        print('model version not approved')
+        return None
 
     model_name = model_package_name + "-" + str(model_package_version)
 
     # look for existing model
-    if model_name_exists(boto_session, model_name):
+    if model_name_exists(sm_client, model_name):
         print("using existing model")
         describe_model_response = sm_client.describe_model(ModelName=model_name)
         return [model_name, describe_model_response["ModelArn"]]
@@ -345,3 +348,99 @@ def decode_ohe(df, original_col, ohe_cols, drop_ohe=True):
     if drop_ohe:
         df = df.drop(columns=ohe_cols)
     return df
+
+def draw_dag(pipeline_definition):
+
+    definition = json.loads(pipeline_definition)
+
+    G = nx.DiGraph()
+
+    # Add nodes
+    for step in definition['Steps']:
+        G.add_node(step['Name'])
+
+    # Add edges from DependsOn
+    for step in definition['Steps']:
+        if 'DependsOn' in step:
+            for dep in step['DependsOn']:
+                G.add_edge(dep, step['Name'])
+
+    # Also add edges from if_steps/else_steps for ConditionSteps
+    for step in definition['Steps']:
+        if step.get('Type') == 'Condition':
+            for if_step in step.get('IfSteps', []):
+                G.add_edge(step['Name'], if_step['Name'])
+            for else_step in step.get('ElseSteps', []):
+                G.add_edge(step['Name'], else_step['Name'])
+
+    # Draw
+    plt.figure(figsize=(12, 8))
+    pos = nx.spring_layout(G, seed=42)
+    nx.draw(G, pos, with_labels=True, node_color='lightblue',
+            node_size=2000, font_size=8, arrows=True,
+            arrowsize=20, edge_color='gray')
+    plt.title('Pipeline DAG')
+    plt.tight_layout()
+    plt.savefig('pipeline_dag.png', dpi=150)
+    plt.show()
+
+
+def ensure_lambda_trust_policy(role_arn):
+    
+    # Get current trust policy
+    iam = boto3.client('iam')
+    role_name=role_arn.split('/')[-1]
+    role = iam.get_role(RoleName=role_name)
+    current_policy = role['Role']['AssumeRolePolicyDocument']
+    
+    # Get existing principals
+    existing_services = set()
+    for statement in current_policy.get('Statement', []):
+        principal = statement.get('Principal', {})
+        services = principal.get('Service', [])
+        if isinstance(services, str):
+            services = [services]  # normalize to list
+        existing_services.update(services)
+    
+    print(f"Existing trusted services: {existing_services}")
+    
+    # Services we need
+    required_services = {
+        'sagemaker.amazonaws.com',
+        'lambda.amazonaws.com',
+        'states.amazonaws.com',
+        'events.amazonaws.com'
+    }
+    
+    # Check if all required services already present
+    if required_services.issubset(existing_services):
+        print(f"Trust policy already up to date for {role_name}")
+        return
+    
+    # Missing services — update policy
+    missing = required_services - existing_services
+    print(f"Adding missing services: {missing}")
+    
+    trust_policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {
+                    "Service": list(required_services | existing_services)
+                },
+                "Action": "sts:AssumeRole"
+            }
+        ]
+    }
+    
+    iam.update_assume_role_policy(
+        RoleName=role_name,
+        PolicyDocument=json.dumps(trust_policy)
+    )
+    print(f"Trust policy updated for {role_name}")
+
+# Usage
+role_arn = 'arn:aws:iam::088461143167:role/SageMakerExecutionRole-1'
+role_name = role_arn.split('/')[-1]
+ensure_lambda_trust_policy(role_name)

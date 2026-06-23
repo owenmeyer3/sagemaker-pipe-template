@@ -23,11 +23,11 @@ def handler(event, context):
     sm_client = boto3.client('sagemaker')
     
     model_name = event['model_name']
-    model_package_group_name_param = event['model_package_group_name_param']  
+    model_package_group_name = event['model_package_group_name']  
     model_package_version_param = event['model_package_version_param']
-    instance_type = event['instance_type']
-    data_capture_path = event['data_capture_path'] # 's3://omm-test-bucket/data-capture/abalone'
-    endpoint_name=f'{model_package_group_name_param}-{model_package_version_param}-endpoint',
+    instance_type = event['instance_type_param']
+    data_capture_dir = event['data_capture_dir'] # 's3://omm-test-bucket/data-capture/abalone'
+    endpoint_name=f'{model_package_group_name}-{model_package_version_param}-endpoint',
     endpoint_config_name = endpoint_name + "-config"
 
     # Create or select endpoint
@@ -47,7 +47,7 @@ def handler(event, context):
             DataCaptureConfig={
                 'EnableCapture': True,
                 'InitialSamplingPercentage': 100,
-                'DestinationS3Uri': data_capture_path,
+                'DestinationS3Uri': data_capture_dir,
                 'CaptureOptions': [
                     {'CaptureMode': 'Input'},
                     {'CaptureMode': 'Output'}

@@ -2,7 +2,9 @@ from sagemaker.core.lambda_helper import Lambda
 from sagemaker.mlops.workflow.lambda_step import LambdaOutputTypeEnum, LambdaStep, LambdaOutput
 from sagemaker.core.helper.session_helper import Session
 from typing import List, Dict, Optional
+from utils import ensure_lambda_trust_policy
 
+from sagemaker.core.workflow.parameters import ParameterString, ParameterInteger, ParameterBoolean
 
 class LambdaStepBase(LambdaStep):
     def __init__(self,
@@ -18,6 +20,8 @@ class LambdaStepBase(LambdaStep):
         **step_kwargs
     ):
         lambda_kwargs = lambda_kwargs or {}
+
+        ensure_lambda_trust_policy(execution_role_arn)
 
         lambda_func = Lambda(
             function_name=function_name,
@@ -42,14 +46,14 @@ class GetOrCreateModelFromRegistryStep(LambdaStepBase):
         name: str,
         function_name: str,
         execution_role_arn: str,
-        model_package_group_name_param: str,
-        model_package_version_param: str,
+        model_package_group_name: str,
+        model_package_version_param: ParameterInteger,
         sagemaker_session: Session = None,
         lambda_kwargs:Dict=None,
         **step_kwargs
     ):
         inputs={
-            'model_package_group_name': model_package_group_name_param,
+            'model_package_group_name': model_package_group_name,
             'model_package_version': model_package_version_param
         }
 
@@ -79,16 +83,19 @@ class DeployEndpointStep(LambdaStepBase):
         execution_role_arn: str,
         model_name_param: str,
         model_package_group_name: str,
-        model_package_version_param: str,
+        model_package_version_param: ParameterInteger,
+        instance_type_param:ParameterString,
         data_capture_dir:str,
         sagemaker_session: Session = None,
         lambda_kwargs:Dict=None,
         **step_kwargs
     ):
+        print(f'data_capture_dir: {data_capture_dir}')
         inputs={
             'model_name': model_name_param,
             'model_package_group_name': model_package_group_name,
             'model_package_version_param': model_package_version_param,
+            'instance_type_param':instance_type_param,
             'data_capture_dir':data_capture_dir
         }
 
@@ -132,6 +139,7 @@ class PrepBaselineSetsStep(LambdaStepBase):
 
         outputs=[
             LambdaOutput(output_name='baseline_X_dir', output_type=LambdaOutputTypeEnum.String),
+            LambdaOutput(output_name='baseline_X_file', output_type=LambdaOutputTypeEnum.String),
             LambdaOutput(output_name='baseline_X_filename', output_type=LambdaOutputTypeEnum.String),
         ]
     
@@ -200,8 +208,7 @@ class MakeBaselineSetsStep(LambdaStepBase):
         mq_monitor_dir: str,
         mb_monitor_dir: str,
         me_monitor_dir: str,
-        train_file: str,
-        train_X_file: str,
+        baseline_X_file: str,
         sagemaker_session: Session = None,
         lambda_kwargs:Dict=None,
         **step_kwargs
@@ -217,7 +224,7 @@ class MakeBaselineSetsStep(LambdaStepBase):
             'mq_monitor_dir':mq_monitor_dir,
             'mb_monitor_dir':mb_monitor_dir,
             'me_monitor_dir':me_monitor_dir,
-            'baseline_X_file':train_X_file
+            'baseline_X_file':baseline_X_file
         }
 
         outputs=[]
@@ -245,7 +252,7 @@ class CreateScheduledDataQualityMonitorStep(LambdaStepBase):
         monitor_dir:str,
         monitor_name:str,
         endpoint_name:str,
-        data_cature_dir:str,
+        data_capture_dir:str,
         image_uri:str = "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
         instance_count:int = 1,
         instance_type:str = 'ml.m5.large',
@@ -275,7 +282,7 @@ class CreateScheduledDataQualityMonitorStep(LambdaStepBase):
             'data_analysis_start_time': data_analysis_start_time,
             'data_analysis_end_time': data_analysis_end_time,
             'endpoint_name': endpoint_name,
-            'data_cature_dir': data_cature_dir,
+            'data_capture_dir': data_capture_dir,
         }
 
         outputs=[]
@@ -304,7 +311,7 @@ class CreateScheduledModelBiasMonitorStep(LambdaStepBase):
         ground_truth_dir:str,
         monitor_name:str,
         endpoint_name:str,
-        data_cature_dir:str,
+        data_capture_dir:str,
         image_uri:str = "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
         instance_count:int = 1,
         instance_type:str = 'ml.m5.large',
@@ -335,7 +342,7 @@ class CreateScheduledModelBiasMonitorStep(LambdaStepBase):
             'data_analysis_start_time': data_analysis_start_time,
             'data_analysis_end_time': data_analysis_end_time,
             'endpoint_name': endpoint_name,
-            'data_cature_dir': data_cature_dir,
+            'data_capture_dir': data_capture_dir,
         }
 
         outputs=[]
@@ -363,7 +370,7 @@ class CreateScheduledModelExplainabilityMonitorStep(LambdaStepBase):
         monitor_dir:str,
         monitor_name:str,
         endpoint_name:str,
-        data_cature_dir:str,
+        data_capture_dir:str,
         image_uri:str = "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
         instance_count:int = 1,
         instance_type:str = 'ml.m5.large',
@@ -393,7 +400,7 @@ class CreateScheduledModelExplainabilityMonitorStep(LambdaStepBase):
             'data_analysis_start_time': data_analysis_start_time,
             'data_analysis_end_time': data_analysis_end_time,
             'endpoint_name': endpoint_name,
-            'data_cature_dir': data_cature_dir,
+            'data_capture_dir': data_capture_dir,
         }
 
         outputs=[]
@@ -424,7 +431,7 @@ class CreateScheduledModelQualityMonitorStep(LambdaStepBase):
         ground_truth_dir:str,
         monitor_name:str,
         endpoint_name:str,
-        data_cature_dir:str,
+        data_capture_dir:str,
         image_uri:str = "156813124566.dkr.ecr.us-east-1.amazonaws.com/sagemaker-model-monitor-analyzer",
         instance_count:int = 1,
         instance_type:str = 'ml.m5.large',
@@ -456,7 +463,7 @@ class CreateScheduledModelQualityMonitorStep(LambdaStepBase):
             'data_analysis_start_time': data_analysis_start_time,
             'data_analysis_end_time': data_analysis_end_time,
             'endpoint_name': endpoint_name,
-            'data_cature_dir': data_cature_dir,
+            'data_capture_dir': data_capture_dir,
         }
 
         outputs=[]
